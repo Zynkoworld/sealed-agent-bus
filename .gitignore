@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# The leak scanner's roster, if anyone keeps one here. The SHAPE is public (product/release_preflight.py);
+# the NAMES are not. Ours lives OUTSIDE the tree — a file inside it is not in the manifest, and the
+# envelope's integrity chapter is right to call that a problem. AGENTBUS_LEAK_TERMS names the path.
+.leak_terms.json

@@ -1,0 +1,78 @@
+runner: -m pytest -q -p no:cacheprovider
+
+elso menet (a korabbi boritek ellen):
+........................................................................ [  9%]
+........................................................................ [ 19%]
+........................................................................ [ 29%]
+........................................................................ [ 39%]
+........................................................................ [ 49%]
+.................xx..................................................... [ 59%]
+........................................................................ [ 69%]
+...................................................s.................... [ 79%]
+........................................................................ [ 88%]
+.....................................F.................................. [ 98%]
+.......FF                                                                [100%]
+=================================== FAILURES ===================================
+____________ ShippedEnvelope.test_quick_verify_passes_on_this_tree _____________
+
+self = <test_product_evidence.ShippedEnvelope testMethod=test_quick_verify_passes_on_this_tree>
+
+    def test_quick_verify_passes_on_this_tree(self):
+        p = subprocess.run([sys.executable, os.path.join(HERE, "verify_evidence.py"), "--quick", "--json"],
+                           capture_output=True, text=True, timeout=600)
+        rep = json.loads(p.stdout)
+        by = {c["chapter"]: c["status"] for c in rep["chapters"]}
+>       self.assertEqual(by["1. integrity"], "OK", rep["chapters"][0])
+E       AssertionError: 'FAIL' != 'OK'
+E       - FAIL
+E       + OK
+E        : {'chapter': '1. integrity', 'status': 'FAIL', 'detail': 'product/test_product_packaging.py: content differs from the manifest', 'problems': [{'file': 'product/test_product_packaging.py', 'problem': 'content differs from the manifest'}], 'unsealed': []}
+
+product/test_product_evidence.py:110: AssertionError
+_ ReleasePage.test_page_carries_the_artifact_identity_and_regenerates_identically _
+
+self = <test_product_page.ReleasePage testMethod=test_page_carries_the_artifact_identity_and_regenerates_identically>
+
+    def test_page_carries_the_artifact_identity_and_regenerates_identically(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        tree, dist = self.tree_with_suite("280 passed, 1 skipped in 34.68s", t.name)
+        p = self.gen(dist=dist, tree=tree)
+>       self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+E       AssertionError: 1 != 0 : the evidence envelope does not describe the shipped tree: product/test_product_packaging.py: content differs from the manifest
+
+product/test_product_page.py:67: AssertionError
+_________ ReleasePage.test_the_published_page_carries_nothing_internal _________
+
+self = <test_product_page.ReleasePage testMethod=test_the_published_page_carries_nothing_internal>
+
+    def test_the_published_page_carries_nothing_internal(self):
+        """A generált oldal KIFELÉ megy: se belső út, se belső név, se e-mail/IP."""
+        import re
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        tree, dist = self.tree_with_suite("280 passed, 1 skipped in 34.68s", t.name)
+>       self.assertEqual(self.gen(dist=dist, tree=tree).returncode, 0)
+E       AssertionError: 1 != 0
+
+product/test_product_page.py:110: AssertionError
+=========================== short test summary info ============================
+FAILED product/test_product_evidence.py::ShippedEnvelope::test_quick_verify_passes_on_this_tree
+FAILED product/test_product_page.py::ReleasePage::test_page_carries_the_artifact_identity_and_regenerates_identically
+FAILED product/test_product_page.py::ReleasePage::test_the_published_page_carries_nothing_internal
+3 failed, 723 passed, 1 skipped, 2 xfailed in 95.57s (0:01:35)
+
+
+masodik menet (a kesz boritekkel):
+........................................................................ [  9%]
+........................................................................ [ 19%]
+........................................................................ [ 29%]
+........................................................................ [ 39%]
+........................................................................ [ 49%]
+.................xx..................................................... [ 59%]
+........................................................................ [ 69%]
+...................................................s.................... [ 79%]
+........................................................................ [ 88%]
+........................................................................ [ 98%]
+.........                                                                [100%]
+726 passed, 1 skipped, 2 xfailed in 92.54s (0:01:32)

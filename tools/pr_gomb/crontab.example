@@ -1,0 +1,9 @@
+# pr_gomb — a két cron-sor. MINDIG fájlon át (valaszok.jsonl), soha csövön; mindkettő flock alatt, percenként.
+# A könyvtár a klón helye szerint: itt /opt/agent-bus/tools/pr_gomb — írd át a sajátodra.
+
+# 1) a gomb-válaszok lekérése (callback_query -> valaszok.jsonl). HA MÁR VAN saját Telegram-pollered ugyanezzel a
+#    bot-tokennel, EZT NE futtasd (közös getUpdates-offset) — lásd README „Meglévő poller".
+* * * * * flock -n /opt/agent-bus/tools/pr_gomb/.poll.lock /usr/bin/python3 /opt/agent-bus/tools/pr_gomb/telegram_gomb_poll.py >> /opt/agent-bus/tools/pr_gomb/poll.log 2>&1
+
+# 2) a döntések végrehajtása (merge / NEM / „nem futott, mert…")
+* * * * * flock -n /opt/agent-bus/tools/pr_gomb/.lock /usr/bin/python3 /opt/agent-bus/tools/pr_gomb/pr_gomb.py feldolgoz >> /opt/agent-bus/tools/pr_gomb/pr_gomb.log 2>&1

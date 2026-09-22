@@ -1,0 +1,367 @@
+{
+ "demo_chain": {
+  "entries": 12,
+  "status": "OK",
+  "trusted": true,
+  "verified_checkpoints": 1,
+  "verify": "python3 bus_notary.py verify product/evidence/notary/chain.jsonl --pub $(cat product/evidence/notary/PUBKEY.txt)"
+ },
+ "floor_note": "Every claim ships with a guard-off mutation and the tests that MUST go red because of it. A claim whose tests stay green with its guard removed is a silent green and fails the floor. Tests marked peer_written were written by the reviewing party, not by us, and are shipped verbatim.",
+ "measured_utc": "2026-09-22T04:19:53Z",
+ "notary_probes": [
+  {
+   "detail": "ok=True trusted=True",
+   "expected": "ok:true trusted:true",
+   "ok": true,
+   "probe": "clean chain verifies and is trusted"
+  },
+  {
+   "detail": "",
+   "expected": "the probe body never appears in the log file",
+   "ok": true,
+   "probe": "log holds no plaintext"
+  },
+  {
+   "detail": "['entry rewritten (hash mismatch)']",
+   "expected": "error at that seq",
+   "ok": true,
+   "probe": "edited entry"
+  },
+  {
+   "detail": "['chain broken (prev_hash does not match previous entry)']",
+   "expected": "the next entry's chain link breaks",
+   "ok": true,
+   "probe": "entry re-hashed after editing"
+  },
+  {
+   "detail": "['gap: entries 5..5 missing']",
+   "expected": "gap reported",
+   "ok": true,
+   "probe": "entry deleted"
+  },
+  {
+   "detail": "['gap: entries 2..2 missing']",
+   "expected": "reordered / chain broken",
+   "ok": true,
+   "probe": "entries reordered"
+  },
+  {
+   "detail": "['forged checkpoint signature']",
+   "expected": "forged checkpoint signature",
+   "ok": true,
+   "probe": "checkpoint signature forged"
+  },
+  {
+   "detail": "['checkpoint signed by an untrusted key']",
+   "expected": "untrusted key",
+   "ok": true,
+   "probe": "checkpoint signed by another key"
+  },
+  {
+   "detail": "trusted=False tail=1",
+   "expected": "ok but NOT trusted",
+   "ok": true,
+   "probe": "slice with no verified checkpoint"
+  },
+  {
+   "detail": "{\"same\": false, \"fork\": true, \"reason\": \"entry_differs\", \"overlap\": [1, 1], \"compared\": 1, \"first_diff\": 1}",
+   "expected": "not 'same', and 'nothing to compare' is not 'fine'",
+   "ok": true,
+   "probe": "two divergent exports compared"
+  },
+  {
+   "detail": "[{'seq': 9, 'recipient': 'probe', 'reason': 'cursor 0->9 (ack 2)', 'cursor_from': 0, 'cursor_to': 9, 'ack': 2}]",
+   "expected": "reported as a violation",
+   "ok": true,
+   "probe": "ack whose cursor target exceeds max(from, ack)"
+  }
+ ],
+ "results": [
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpqpymq3_7/floor.xml ---------------- | 4 passed in 0.47s",
+   "claim": "An inbound message is recorded in the notary log before it is inserted into the bus.",
+   "id": "inbound-log-first",
+   "mutant_red": 4,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_peer_notary_failopen.py::MateNotaryFailOpen::test_write_failure_does_not_deliver_unnotarized_mail | 4 failed in 0.84s",
+   "newly_red": [
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_client_retry_does_not_amplify_unnotarized_delivery",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_omission_leaves_a_visible_gap_in_the_log",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_partial_write_failure_leaves_no_unnotarized_mail",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_write_failure_does_not_deliver_unnotarized_mail"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 4 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_client_retry_does_not_amplify_unnotarized_delivery",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_omission_leaves_a_visible_gap_in_the_log",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_partial_write_failure_leaves_no_unnotarized_mail",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_write_failure_does_not_deliver_unnotarized_mail"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_notary_failopen.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmp42puneil/floor.xml ---------------- | 22 passed in 3.72s",
+   "claim": "If the notary log cannot be written, the boundary operation does not happen (fail-closed).",
+   "id": "log-write-failure-blocks",
+   "mutant_red": 6,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_ssh_outbound_notary.py::OutboundLogFirst::test_partial_failure_logs_before_hand_out_never_after | 6 failed, 16 passed in 4.22s",
+   "newly_red": [
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_client_retry_does_not_amplify_unnotarized_delivery",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_omission_leaves_a_visible_gap_in_the_log",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_partial_write_failure_leaves_no_unnotarized_mail",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_write_failure_does_not_deliver_unnotarized_mail",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_notary_failure_hands_out_nothing_and_moves_no_cursor",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_partial_failure_logs_before_hand_out_never_after"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 6 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_client_retry_does_not_amplify_unnotarized_delivery",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_omission_leaves_a_visible_gap_in_the_log",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_partial_write_failure_leaves_no_unnotarized_mail",
+    "test_peer_notary_failopen.MateNotaryFailOpen::test_write_failure_does_not_deliver_unnotarized_mail",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_notary_failure_hands_out_nothing_and_moves_no_cursor",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_partial_failure_logs_before_hand_out_never_after"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_notary_failopen.py",
+    "test_ssh_outbound_notary.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpbhwil59j/floor.xml ---------------- | 22 passed in 4.80s",
+   "claim": "Replies handed to a remote peer are recorded before hand-out.",
+   "id": "outbound-logged",
+   "mutant_red": 8,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_ssh_outbound_notary.py::ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump | 8 failed, 14 passed in 3.43s",
+   "newly_red": [
+    "test_ssh_outbound_notary.ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_partial_failure_logs_before_hand_out_never_after",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_replies_and_ack_are_logged_with_hashes_the_receiver_can_recompute",
+    "test_ssh_outbound_notary.Reconcile::test_clean_rounds_reconcile",
+    "test_ssh_outbound_notary.Reconcile::test_cli_delivered_not_received_rc_dev_warns_strict_and_product_fail",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_detects_unlogged_delivery_and_unlogged_ack",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_failed_ack_does_not_count_as_a_cursor_move",
+    "test_ssh_outbound_notary.Reconcile::test_two_way_forged_ack_and_unreceived_delivery_are_discrepancies"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 8 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_ssh_outbound_notary.ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_partial_failure_logs_before_hand_out_never_after",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_replies_and_ack_are_logged_with_hashes_the_receiver_can_recompute",
+    "test_ssh_outbound_notary.Reconcile::test_clean_rounds_reconcile",
+    "test_ssh_outbound_notary.Reconcile::test_cli_delivered_not_received_rc_dev_warns_strict_and_product_fail",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_detects_unlogged_delivery_and_unlogged_ack",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_failed_ack_does_not_count_as_a_cursor_move",
+    "test_ssh_outbound_notary.Reconcile::test_two_way_forged_ack_and_unreceived_delivery_are_discrepancies"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_outbound_notary.py",
+    "test_ssh_outbound_notary.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpbhwil59j/floor.xml ---------------- | 22 passed in 4.80s",
+   "claim": "A cursor move (ack) is recorded before the cursor is moved.",
+   "id": "cursor-move-logged",
+   "mutant_red": 6,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_ssh_outbound_notary.py::ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump | 6 failed, 16 passed in 3.67s",
+   "newly_red": [
+    "test_ssh_outbound_notary.ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_ack_failure_after_logging_adds_a_rejected_entry",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_notary_failure_hands_out_nothing_and_moves_no_cursor",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_replies_and_ack_are_logged_with_hashes_the_receiver_can_recompute",
+    "test_ssh_outbound_notary.Reconcile::test_clean_rounds_reconcile",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_failed_ack_does_not_count_as_a_cursor_move"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 6 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_ssh_outbound_notary.ClientReceiptsEndToEnd::test_receipts_reconcile_clean_then_flag_a_withheld_cursor_jump",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_ack_failure_after_logging_adds_a_rejected_entry",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_notary_failure_hands_out_nothing_and_moves_no_cursor",
+    "test_ssh_outbound_notary.OutboundLogFirst::test_replies_and_ack_are_logged_with_hashes_the_receiver_can_recompute",
+    "test_ssh_outbound_notary.Reconcile::test_clean_rounds_reconcile",
+    "test_ssh_outbound_notary.Reconcile::test_reconcile_failed_ack_does_not_count_as_a_cursor_move"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_outbound_notary.py",
+    "test_ssh_outbound_notary.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpzi3h7zfz/floor.xml ---------------- | 4 passed in 0.70s",
+   "claim": "Reconciliation checks the log against the peer's receipts too, so an invented entry cannot cover a loss.",
+   "id": "reconcile-two-way",
+   "mutant_red": 1,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_peer_reconcile_ack_forgery.py::ReconcileOneWay::test_forged_ack_entry_must_not_hide_a_withheld_cursor_jump | 1 failed, 3 passed in 0.73s",
+   "newly_red": [
+    "test_peer_reconcile_ack_forgery.ReconcileOneWay::test_forged_ack_entry_must_not_hide_a_withheld_cursor_jump"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 1 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_peer_reconcile_ack_forgery.ReconcileOneWay::test_forged_ack_entry_must_not_hide_a_withheld_cursor_jump"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_reconcile_ack_forgery.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmp6_otdvbx/floor.xml ---------------- | 5 passed in 0.71s",
+   "claim": "A logged cursor target beyond max(previous cursor, acknowledged id) is reported.",
+   "id": "cursor-target-bound",
+   "mutant_red": 1,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_peer_reconcile_cursor_target.py::CursorTargetUnbound::test_cursor_target_beyond_acked_is_reported | 1 failed, 4 passed in 0.72s",
+   "newly_red": [
+    "test_peer_reconcile_cursor_target.CursorTargetUnbound::test_cursor_target_beyond_acked_is_reported"
+   ],
+   "peer_written": true,
+   "reason": "green with the guard; 1 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_peer_reconcile_cursor_target.CursorTargetUnbound::test_cursor_target_beyond_acked_is_reported"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_peer_reconcile_cursor_target.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpyyut7k7y/floor.xml ---------------- | 33 passed in 1.82s",
+   "claim": "In product mode the bus refuses unsigned, forged, stale, replayed and malformed-attachment messages.",
+   "id": "product-mode-refuses",
+   "mutant_red": 16,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_bus_enforce.py::JointReviewPR4::test_M1_rejection_is_reported_on_stderr_also_for_peek | 16 failed, 17 passed in 2.37s",
+   "newly_red": [
+    "test_bus_enforce.Check::test_m1_forged_and_key_mismatch_rejected",
+    "test_bus_enforce.Check::test_m2_replay_within_window_and_after_restart",
+    "test_bus_enforce.Check::test_m3_stale_and_future_ts_rejected",
+    "test_bus_enforce.Check::test_m5_attachment_descriptor_covered_by_signature",
+    "test_bus_enforce.Check::test_m6_unsigned_downgrade_rejected",
+    "test_bus_enforce.JointReviewPR4::test_B1_only_rejected_page_keeps_delivered_and_lists_in_reconcile",
+    "test_bus_enforce.JointReviewPR4::test_B1_rejected_row_does_not_raise_delivered_and_is_reconcilable",
+    "test_bus_enforce.JointReviewPR4::test_B1_window_pinned_7_days_and_300_s",
+    "test_bus_enforce.JointReviewPR4::test_H1_env_cannot_switch_back_to_dev",
+    "test_bus_enforce.JointReviewPR4::test_H2_deleting_enforce_dir_does_not_reopen_replay",
+    "test_bus_enforce.JointReviewPR4::test_H3_audit_records_rejection_not_delivery",
+    "test_bus_enforce.JointReviewPR4::test_H4_unwritable_enforce_dir_does_not_crash",
+    "test_bus_enforce.JointReviewPR4::test_M1_rejection_is_reported_on_stderr_also_for_peek",
+    "test_bus_enforce.RecvIntegration::test_product_recv_filters_and_logs_but_keeps_rows",
+    "test_bus_enforce.RecvIntegration::test_product_recv_rejects_reinserted_duplicate",
+    "test_bus_enforce.RecvIntegration::test_restart_new_process_still_rejects_replay"
+   ],
+   "peer_written": false,
+   "reason": "green with the guard; 16 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_bus_enforce.Check::test_m1_forged_and_key_mismatch_rejected",
+    "test_bus_enforce.Check::test_m2_replay_within_window_and_after_restart",
+    "test_bus_enforce.Check::test_m3_stale_and_future_ts_rejected",
+    "test_bus_enforce.Check::test_m5_attachment_descriptor_covered_by_signature",
+    "test_bus_enforce.Check::test_m6_unsigned_downgrade_rejected",
+    "test_bus_enforce.JointReviewPR4::test_B1_only_rejected_page_keeps_delivered_and_lists_in_reconcile",
+    "test_bus_enforce.JointReviewPR4::test_B1_rejected_row_does_not_raise_delivered_and_is_reconcilable",
+    "test_bus_enforce.JointReviewPR4::test_B1_window_pinned_7_days_and_300_s",
+    "test_bus_enforce.JointReviewPR4::test_H1_env_cannot_switch_back_to_dev",
+    "test_bus_enforce.JointReviewPR4::test_H2_deleting_enforce_dir_does_not_reopen_replay",
+    "test_bus_enforce.JointReviewPR4::test_H3_audit_records_rejection_not_delivery",
+    "test_bus_enforce.JointReviewPR4::test_H4_unwritable_enforce_dir_does_not_crash",
+    "test_bus_enforce.JointReviewPR4::test_M1_rejection_is_reported_on_stderr_also_for_peek",
+    "test_bus_enforce.RecvIntegration::test_product_recv_filters_and_logs_but_keeps_rows",
+    "test_bus_enforce.RecvIntegration::test_product_recv_rejects_reinserted_duplicate",
+    "test_bus_enforce.RecvIntegration::test_restart_new_process_still_rejects_replay"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_bus_enforce.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmpvnsjjg9q/floor.xml ---------------- | 35 passed in 1.88s",
+   "claim": "The notary log holds hashes and metadata only: never a message body, never sealed ciphertext.",
+   "id": "log-holds-no-content",
+   "mutant_red": 2,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_bus_notary.py::NotaryIntegrationTest::test_ssh_exchange_one_entry_per_item_hash_only | 2 failed, 33 passed in 1.98s",
+   "newly_red": [
+    "test_bus_notary.NotaryChainTest::test_clean_chain_verifies_with_signed_checkpoints",
+    "test_bus_notary.NotaryIntegrationTest::test_ssh_exchange_one_entry_per_item_hash_only"
+   ],
+   "peer_written": false,
+   "reason": "green with the guard; 2 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_bus_notary.NotaryChainTest::test_clean_chain_verifies_with_signed_checkpoints",
+    "test_bus_notary.NotaryIntegrationTest::test_ssh_exchange_one_entry_per_item_hash_only"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_bus_notary.py"
+   ]
+  },
+  {
+   "baseline_rc": 0,
+   "baseline_red": 0,
+   "baseline_tail": "---------------- generated xml file: /tmp/tmp46870vvj/floor.xml ---------------- | 13 passed in 9.91s",
+   "claim": "A lock held by a process that is gone does not block the next owner.",
+   "id": "dead-owner-lock",
+   "mutant_red": 3,
+   "mutated_rc": 1,
+   "mutated_tail": "FAILED test_bus_singleflight.py::OwnerNotLiveB1var2::test_live_panel_dead_owner_vs_live_panel_live_owner_never_double | 3 failed, 10 passed in 10.15s",
+   "newly_red": [
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_dead_owner_is_refused_and_writes_nothing",
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_dead_owner_vs_live_owner_never_double",
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_live_panel_dead_owner_vs_live_panel_live_owner_never_double"
+   ],
+   "peer_written": false,
+   "reason": "green with the guard; 3 test(s) decided against it without it",
+   "resurrected": [],
+   "semantic_kills": [
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_dead_owner_is_refused_and_writes_nothing",
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_dead_owner_vs_live_owner_never_double",
+    "test_bus_singleflight.OwnerNotLiveB1var2::test_live_panel_dead_owner_vs_live_panel_live_owner_never_double"
+   ],
+   "status": "OK",
+   "tests": [
+    "test_bus_singleflight.py"
+   ]
+  }
+ ]
+}

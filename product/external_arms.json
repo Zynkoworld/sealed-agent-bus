@@ -1,0 +1,88 @@
+{
+ "arms": [
+  {
+   "commit": "a131d977a5dc6f874394ac572ebfbb10eaa60169",
+   "files": [
+    {
+     "path": "CONFORMANCE_VECTORS.jsonl",
+     "sha256": "d3c6da150c3c3195d4e04b6210450a74950e8a6c5d53bf31c46569b0d6e42c65"
+    },
+    {
+     "path": "SDS_CONFORMANCE_VECTORS_v2.jsonl",
+     "sha256": "57a738a1d245af3a6e4d56ed374d4ef16a68575128e46c6470629829fb020a67"
+    },
+    {
+     "path": "arm_A/manifest.json",
+     "sha256": "11d41f2cd0c04857e6f04821c70138968690dda01e2e58768e00692fd32e2273"
+    },
+    {
+     "path": "arm_A/manifest_v2.json",
+     "sha256": "dac7d14cdcfd06d4e641ce9900215a02d3a2c2eecabcff06c0f3c9ebe4680a33"
+    },
+    {
+     "path": "arm_B/manifest.json",
+     "sha256": "fca62f9a10809e9156127b28628f1cc4e496b3d53c47bd9a25b6347ebff54e4c"
+    },
+    {
+     "path": "arm_B/manifest_v2.json",
+     "sha256": "a9e02a5a7f0db827c07077af265fbda6c21d9e976af4632047b6f5891e869872"
+    },
+    {
+     "path": "sds/arm_A/blind_attestation.json",
+     "sha256": "ad83f4564564be5cbfa5465e720781f7f2228e9e6b33dfe94f21bf21dddccc66"
+    },
+    {
+     "path": "sds/arm_B/blind_attestation.json",
+     "sha256": "a1067210f10afa2c4c04640f051db5647628726d8c1ee87e9eed06045d3caf0e"
+    },
+    {
+     "path": "two_arm_compare.py",
+     "sha256": "3be780dcc068355571cbf09e24d925ecbae74f3f04b6d1702b4bee28d624b0ff"
+    },
+    {
+     "path": "verify_v2.py",
+     "sha256": "13a530a4c370623c5f7bce49df5291978e422b92375c276bce171fdf341cf50d"
+    }
+   ],
+   "id": "sds-two-arm-conformance",
+   "limits": "This proves the two arms agree on the pinned corpus at this commit. It does not prove either arm is correct against reality, and it says nothing about this bus's transport code — that is chapters 1-3.",
+   "measured_by": "this product's packaging step, on a read-only checkout of the pinned commit",
+   "measured_utc": "2026-09-19T07:",
+   "repository": "capsule2-spec (conformance line, two-key governed)",
+   "results": [
+    {
+     "command": "python3 two_arm_compare.py.",
+     "output": "BYTE-MATCH: two distinct provenance-bound arms (A/zynko vs B/matesensei) agree on all 140 pinned outputs @ spec 0dd5478f04ac",
+     "rc": 0
+    },
+    {
+     "command": "python3 verify_v2.py. --two-arm",
+     "output": "two-arm v2: 173 outputs, DIFFER 0 | spec_sha 0dd5478f04ac | base_corpus_digest d3c6da150c3c | fields closed 10/10",
+     "rc": 0
+    },
+    {
+     "command": "python3 blind_attest_gate.py.",
+     "output": "BOUND: both arms' attestations are internally consistent with their committed transcripts, signed by distinct per-arm keys",
+     "rc": 0
+    }
+   ],
+   "status": "measured",
+   "what": "Two independent implementations of the SDS canonical form (RFC 8785 JCS envelopes) agree byte for byte: arm_A (org zynko, Python, impl 1572ed148c1c) and arm_B (org matesensei, Rust crate sds-arm-b, impl 127bf1a1e2e9; v2 outputs at ed7f4aeedb13). Different organizations, different languages, different engines; each arm's transcript is bound to its own blind-derivation attestation signed with its own key."
+  },
+  {
+   "commit": null,
+   "id": "lattice-net-two-arm",
+   "limits": "Not pinned here yet: the commit and artifact hashes are not available on this machine, so the envelope does NOT claim it. It is listed so the gap is visible rather than quietly omitted.",
+   "repository": "lattice-net (partner line)",
+   "status": "pin-missing",
+   "what": "A further partner arm reported as capsule2-conform with a 231/231 two-arm byte-lock."
+  },
+  {
+   "id": "live-isolation-audit",
+   "limits": "Ramp-up is months away. The envelope deliberately does not depend on it; when findings exist they become an ADDITIONAL data point, not the basis of chapter 4.",
+   "status": "open",
+   "what": "An independent auditor attacks a running deployment from the outside."
+  }
+ ],
+ "note": "Chapter 4 evidence: the canonical envelope layer this product relies on is implemented TWICE, by two organizations, and the two implementations byte-match on a pinned corpus. These artifacts are NOT shipped inside this archive — they live in the partner repositories. What ships is the pin: repository, commit, file and sha256, plus the exact commands that reproduce the match. A buyer with a checkout can verify every line; the verifier can re-check the hashes locally with --external-root."
+}

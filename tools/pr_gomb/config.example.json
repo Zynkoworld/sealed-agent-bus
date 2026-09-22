@@ -1,0 +1,9 @@
+{
+  "github_org": "Matesensei",
+  "github_token_file": "~/.config/agentbus/github_token",
+  "telegram_bot_token_file": "~/.config/agentbus/telegram_bot_token",
+  "telegram_chat_id_file": "~/.config/agentbus/telegram_chat_operator",
+  "owner_id": 123456789,
+  "self_login": "Matesensei",
+  "disabled_marker": "~/.config/agentbus/telegram_DISABLED"
+}

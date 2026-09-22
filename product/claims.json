@@ -1,0 +1,126 @@
+{
+ "floor_note": "Every claim ships with a guard-off mutation and the tests that MUST go red because of it. A claim whose tests stay green with its guard removed is a silent green and fails the floor. Tests marked peer_written were written by the reviewing party, not by us, and are shipped verbatim.",
+ "claims": [
+  {
+   "id": "inbound-log-first",
+   "claim": "An inbound message is recorded in the notary log before it is inserted into the bus.",
+   "tests": [
+    "test_peer_notary_failopen.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_ssh_exchange.py",
+    "find": "        note(envelope=m, recipient=m[\"to\"], kind=kind, decision=\"accepted\", claimed_ts=claimed)",
+    "replace": "        pass  # MUTATION: no entry before the bus insert"
+   }
+  },
+  {
+   "id": "log-write-failure-blocks",
+   "claim": "If the notary log cannot be written, the boundary operation does not happen (fail-closed).",
+   "tests": [
+    "test_peer_notary_failopen.py",
+    "test_ssh_outbound_notary.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_ssh_exchange.py",
+    "find": "            except Exception:\n                raise _NotaryWriteFailed(out)",
+    "replace": "            except Exception:\n                return  # MUTATION: a failed log write no longer stops the operation"
+   }
+  },
+  {
+   "id": "outbound-logged",
+   "claim": "Replies handed to a remote peer are recorded before hand-out.",
+   "tests": [
+    "test_peer_outbound_notary.py",
+    "test_ssh_outbound_notary.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_ssh_exchange.py",
+    "find": "            note(envelope=x, recipient=identity, kind=\"pickup\", decision=\"delivered\", reason=\"id=%s\" % rid,\n                 cursor=({\"id\": int(rid)} if isinstance(rid, int) and not isinstance(rid, bool) and rid >= 0 else None))",
+    "replace": "            pass  # MUTATION: handed-out replies are not recorded"
+   },
+   "tests_note": "the peer-written test alone does not cover the per-reply entry (measured by the floor: it stays green when only the per-reply entries are removed, because the round entry remains); our own test pins the exact entries"
+  },
+  {
+   "id": "cursor-move-logged",
+   "claim": "A cursor move (ack) is recorded before the cursor is moved.",
+   "tests": [
+    "test_peer_outbound_notary.py",
+    "test_ssh_outbound_notary.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_ssh_exchange.py",
+    "find": "        note(envelope={\"ack\": ack_to, \"cursor_from\": base, \"cursor_to\": tgt}, recipient=identity, kind=\"ack\",\n             decision=\"accepted\", reason=\"cursor %d->%d (ack %d)\" % (base, tgt, ack_to),\n             cursor={\"from\": base, \"to\": tgt, \"ack\": ack_to})",
+    "replace": "        pass  # MUTATION: the cursor moves with no entry"
+   }
+  },
+  {
+   "id": "reconcile-two-way",
+   "claim": "Reconciliation checks the log against the peer's receipts too, so an invented entry cannot cover a loss.",
+   "tests": [
+    "test_peer_reconcile_ack_forgery.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_notary.py",
+    "find": "        else:                                                    # kizárt (OSError not-sent) vagy semmi: hard vád\n            disc.append({\"type\": \"ack_logged_not_sent\", \"ack\": a, \"logged\": n, \"sent\": sent_acks[a]})",
+    "replace": "        else:\n            pass  # MUTATION: the log is no longer checked against the receipts"
+   }
+  },
+  {
+   "id": "cursor-target-bound",
+   "claim": "A logged cursor target beyond max(previous cursor, acknowledged id) is reported.",
+   "tests": [
+    "test_peer_reconcile_cursor_target.py"
+   ],
+   "peer_written": true,
+   "mutation": {
+    "file": "bus_notary.py",
+    "find": "            if to > max(frm, up):",
+    "replace": "            if False and to > max(frm, up):  # MUTATION: the cursor target is accepted uncritically"
+   }
+  },
+  {
+   "id": "product-mode-refuses",
+   "claim": "In product mode the bus refuses unsigned, forged, stale, replayed and malformed-attachment messages.",
+   "tests": [
+    "test_bus_enforce.py"
+   ],
+   "peer_written": false,
+   "mutation": {
+    "file": "bus_enforce.py",
+    "find": "    auth = ab.verify_sender(msg, keys_dir=keys_dir)\n    if auth == \"unsigned\":\n        return False, \"unsigned-downgrade\"",
+    "replace": "    auth = ab.verify_sender(msg, keys_dir=keys_dir)\n    return True, \"ok\"  # MUTATION: the product gate accepts everything"
+   }
+  },
+  {
+   "id": "log-holds-no-content",
+   "claim": "The notary log holds hashes and metadata only: never a message body, never sealed ciphertext.",
+   "tests": [
+    "test_bus_notary.py"
+   ],
+   "peer_written": false,
+   "mutation": {
+    "file": "bus_notary.py",
+    "find": "                e = {\"seq\": seq + 1, \"prev_hash\": head, \"received_at_ms\": int(self.clock()), \"envelope_sha256\": env_sha,",
+    "replace": "                e = {\"seq\": seq + 1, \"prev_hash\": head, \"received_at_ms\": int(self.clock()), \"envelope_sha256\": env_sha, \"plaintext\": repr(envelope)[:400],  # MUTATION: content in the log"
+   }
+  },
+  {
+   "id": "dead-owner-lock",
+   "claim": "A lock held by a process that is gone does not block the next owner.",
+   "tests": [
+    "test_bus_singleflight.py"
+   ],
+   "peer_written": false,
+   "mutation": {
+    "file": "bus_singleflight.py",
+    "find": "        if owner_pid is not None and not self.is_alive(owner_pid):\n            return (\"owner-not-live\", {\"instance\": instance, \"pid\": owner_pid, \"pid_src\": \"owner\"})",
+    "replace": "        pass  # MUTATION: a dead owner keeps the lock"
+   }
+  }
+ ]
+}
