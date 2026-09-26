@@ -1,17 +1,17 @@
-"""A kulcs-olvasás guardja: symlink és TOCTOU — saját.
+"""The key-reading guard: symlink and TOCTOU — our own.
 
-A registry-kulcs (`<agent>.pub`) és a privát seed (`<agent>.ed25519.key`) beolvasása eddig KÉT
-műveletből állt: előbb `os.stat` (jogosultság-ellenőrzés), aztán `open` (olvasás). A kettő között a
-fájl kicserélhető, és a `stat` a symlink CÉLJÁT követte — tehát egy root-tulajdonú fájlra mutató
-symlink átment a guardon, miközben magát a linket bárki átírhatta, aki a könyvtárba írhat.
+Reading the registry key (`<agent>.pub`) and the private seed (`<agent>.ed25519.key`) used to consist of TWO
+operations: first `os.stat` (permission check), then `open` (read). Between the two the
+file could be swapped, and `stat` followed the symlink's TARGET — so a symlink pointing to a root-owned file
+passed the guard, while the link itself could be rewritten by anyone who can write to the directory.
 
-Javítás: egyetlen megnyitás `O_NOFOLLOW`-val, és a jogosultság-ellenőrzés a MEGNYITOTT fd-n
-(`fstat`); a seed-útnál `lstat` + „csak valódi fájl".
+Fix: a single open with `O_NOFOLLOW`, and the permission check on the OPENED fd
+(`fstat`); on the seed path `lstat` + "a regular file only".
 
-MEGJEGYZÉS a fenyegetési modellhez: a kulcs-könyvtár root-tulajdonú és nem világ-írható, tehát ez
-MÉLYSÉGI VÉDELEM, nem az utolsó fal. Az elv viszont áll: amit ellenőrzünk, azt olvassuk is.
+A NOTE on the threat model: the key directory is root-owned and not world-writable, so this is
+DEFENCE IN DEPTH, not the last wall. But the principle stands: what we check is what we read.
 
-stdlib unittest. Root alatt fut (a flotta így futtatja); ha nem root, a teszt kihagyja magát.
+stdlib unittest. Runs as root (the fleet runs it so); if not root, the test skips itself.
 """
 import os
 import sys
@@ -23,7 +23,7 @@ sys.path.insert(0, HERE)
 import agent_bus as ab  # noqa: E402
 
 
-@unittest.skipUnless(os.geteuid() == 0, "a guard root-tulajdonú fájlokat követel")
+@unittest.skipUnless(os.geteuid() == 0, "the guard requires root-owned files")
 class KeyGuardFollowsNoSymlink(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -37,7 +37,7 @@ class KeyGuardFollowsNoSymlink(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    # ── kontroll: a valódi, root-tulajdonú kulcsfájl olvasható ──────────────
+    # ── control: a real, root-owned key file is read ──────────────
     def test_control_regular_root_owned_key_is_read(self):
         p = os.path.join(self.keys, "hub.pub")
         with open(p, "w") as f:
@@ -46,16 +46,16 @@ class KeyGuardFollowsNoSymlink(unittest.TestCase):
         self.assertEqual(ab._a2_guarded_read(p), "cd" * 32)
         self.assertEqual(ab._a2_load_registry_pubkey("hub", self.keys), "cd" * 32)
 
-    # ── LELET: a symlink a kulcs helyén nem olvasható (a `stat` a CÉLT nézte) ──
+    # ── FINDING: a symlink in the key's place is not read (`stat` looked at the TARGET) ──
     def test_symlinked_key_is_refused(self):
         p = os.path.join(self.keys, "hub.pub")
         os.symlink(self.real, p)
         self.assertIsNone(ab._a2_guarded_read(p),
-                          "a symlink átment a guardon: a jogosultság a CÉLÉ, a tartalmat viszont a link gazdája "
-                          "irányítja")
+                          "the symlink passed the guard: the permissions are the target's, but the content is controlled "
+                          "by the link's owner")
         self.assertIsNone(ab._a2_load_registry_pubkey("hub", self.keys))
 
-    # ── a privát seed útján ugyanaz ─────────────────────────────────────────
+    # ── the same on the private seed's path ─────────────────────────────────────────
     def test_symlinked_private_seed_is_refused(self):
         real = os.path.join(self.tmp.name, "seed.key")
         with open(real, "w") as f:
@@ -64,7 +64,7 @@ class KeyGuardFollowsNoSymlink(unittest.TestCase):
         link = os.path.join(self.keys, "hub.ed25519.key")
         os.symlink(real, link)
         self.assertIsNone(ab._a2_default_sign_key("hub", keys_dir=self.keys),
-                          "a seed helyén álló symlink elfogadott volt")
+                          "a symlink in the seed's place was accepted")
 
     def test_control_regular_private_seed_is_accepted(self):
         p = os.path.join(self.keys, "hub.ed25519.key")
@@ -73,7 +73,7 @@ class KeyGuardFollowsNoSymlink(unittest.TestCase):
         os.chmod(p, 0o600)
         self.assertEqual(ab._a2_default_sign_key("hub", keys_dir=self.keys), p)
 
-    # ── a laza jogosultság továbbra is bukik (régi szabály, nem gyengült) ────
+    # ── lax permissions still fail (an old rule, not weakened) ────
     def test_control_lax_permissions_still_refused(self):
         p = os.path.join(self.keys, "hub.ed25519.key")
         with open(p, "w") as f:
@@ -81,7 +81,7 @@ class KeyGuardFollowsNoSymlink(unittest.TestCase):
         os.chmod(p, 0o644)
         self.assertIsNone(ab._a2_default_sign_key("hub", keys_dir=self.keys))
 
-    # ── a traversal-kísérlet változatlanul elbukik ──────────────────────────
+    # ── a traversal attempt still fails ──────────────────────────
     def test_control_traversal_in_sender_name_is_refused(self):
         self.assertIsNone(ab._a2_load_registry_pubkey("../elsewhere", self.keys))
         self.assertIsNone(ab._a2_load_registry_pubkey("..", self.keys))

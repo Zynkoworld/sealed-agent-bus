@@ -1,17 +1,17 @@
-"""Az SSH-beléptető sor támadása — saját.
+"""An attack on the SSH enrolment line — our own.
 
-Ez a modul állítja elő azt az `authorized_keys` sort, amit az operátor a busz-gépre tesz — tehát ez az
-ÉLESÍTÉS kapuja. Négy lelet a nem-Claude kartól:
+This module produces the `authorized_keys` line the operator puts onto the bus machine — so it is the
+gate of ARMING. Four findings from the non-Claude arm:
 
-  1. nincs `from=` forráskorlát -> egy kiszivárgott kulcs a világ bármely pontjáról használható.
-     Javítás: `--from` kapcsoló; nélküle a CLI FIGYELMEZTET (a korlát a partner címétől függ, ezért opció).
-  2. az idempotencia CSENDES DOWNGRADE volt: ha a kulcs már bent volt egy gyengébb (restrict nélküli vagy
-     más identitásra pinelt) sorban, a modul „already present"-et mondott, és a korlátozott sor SOSEM
-     került be. Javítás: azonos kulcs + eltérő sor -> hangos hiba.
-  3. az `ssh-rsa` bármilyen hosszal átment (csak az alakot néztük). Javítás: a blob dekódolása és a modulus
-     bithosszának ellenőrzése (min. 3072; ed25519 az ajánlott).
-  4. MEGCÁFOLVA: shell-injekció a `command=`-ba — az identitás charsetje kötött, a kulcs-komment levágva, a
-     parancs metakarakter-mentes.
+  1. no `from=` source limit -> a leaked key can be used from anywhere in the world.
+     Fix: a `--from` switch; without it the CLI WARNS (the limit depends on the partner's address, so it is an option).
+  2. the idempotence was a SILENT DOWNGRADE: if the key was already present in a weaker (without restrict or
+     pinned to another identity) line, the module said "already present", and the restricted line NEVER
+     got in. Fix: the same key + a different line -> a loud error.
+  3. `ssh-rsa` passed with any length (we only looked at the shape). Fix: decoding the blob and checking the modulus
+     bit length (min. 3072; ed25519 is recommended).
+  4. REFUTED: shell injection into `command=` — the identity's charset is bound, the key comment is cut off, the
+     command is free of metacharacters.
 
 stdlib unittest.
 """
@@ -34,25 +34,25 @@ def _ssh_blob(*fields):
 
 
 def ed25519_key():
-    return "ssh-ed25519 %s teszt@gep" % _ssh_blob(b"ssh-ed25519", os.urandom(32))
+    return "ssh-ed25519 %s test@host" % _ssh_blob(b"ssh-ed25519", os.urandom(32))
 
 
 def rsa_key(bits):
     n = (1 << (bits - 1)) | 1
     modulus = n.to_bytes(bits // 8, "big")
-    return "ssh-rsa %s teszt@gep" % _ssh_blob(b"ssh-rsa", b"\x01\x00\x01", b"\x00" + modulus)
+    return "ssh-rsa %s test@host" % _ssh_blob(b"ssh-rsa", b"\x01\x00\x01", b"\x00" + modulus)
 
 
 class EnrollHardening(unittest.TestCase):
-    # ── kontroll: a korlátozott sor alakja ──────────────────────────────────
+    # ── control: the shape of the restricted line ──────────────────────────────────
     def test_control_line_shape(self):
         line = en.enroll_line("peer", ed25519_key(), CMD)
         self.assertTrue(line.startswith('command="%s peer",restrict,' % CMD))
         for opt in ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-user-rc"):
             self.assertIn(opt, line)
-        self.assertNotIn("teszt@gep", line, "a kulcs-komment nem kerülhet a sorba")
+        self.assertNotIn("test@host", line, "the key comment cannot get into the line")
 
-    # ── 1: from= forráskorlát ───────────────────────────────────────────────
+    # ── 1: the from= source limit ───────────────────────────────────────────────
     def test_from_restriction_is_emitted_and_validated(self):
         line = en.enroll_line("peer", ed25519_key(), CMD, source="192.0.2.0/24")
         self.assertIn('from="192.0.2.0/24",restrict', line)
@@ -61,7 +61,7 @@ class EnrollHardening(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     en.enroll_line("peer", ed25519_key(), CMD, source=bad)
 
-    # ── 3: kulcs-erősség ────────────────────────────────────────────────────
+    # ── 3: key strength ────────────────────────────────────────────────────
     def test_weak_rsa_is_refused(self):
         with self.assertRaises(ValueError) as cm:
             en.enroll_line("peer", rsa_key(1024), CMD)
@@ -76,12 +76,12 @@ class EnrollHardening(unittest.TestCase):
             en.enroll_line("peer", fake, CMD)
         self.assertIn("does not match", str(cm.exception))
 
-    # ── 2: nincs csendes downgrade ──────────────────────────────────────────
+    # ── 2: no silent downgrade ──────────────────────────────────────────
     def test_existing_weaker_line_is_not_silently_kept(self):
         key = ed25519_key()
         line = en.enroll_line("peer", key, CMD)
         path = os.path.join(tempfile.mkdtemp(), "authorized_keys")
-        with open(path, "w", encoding="utf-8") as f:                    # RÉGI, korlátozás nélküli sor
+        with open(path, "w", encoding="utf-8") as f:                    # an OLD line without restrictions
             f.write("%s\n" % " ".join(key.split()[:2]))
         with self.assertRaises(ValueError) as cm:
             en.write_line(path, line)
@@ -91,7 +91,7 @@ class EnrollHardening(unittest.TestCase):
         line = en.enroll_line("peer", ed25519_key(), CMD)
         path = os.path.join(tempfile.mkdtemp(), "authorized_keys")
         self.assertTrue(en.write_line(path, line))
-        self.assertFalse(en.write_line(path, line), "ugyanaz a sor másodszor nem duplikálódik")
+        self.assertFalse(en.write_line(path, line), "the same line is not duplicated the second time")
 
     def test_same_key_other_identity_is_refused(self):
         key = ed25519_key()
@@ -100,7 +100,7 @@ class EnrollHardening(unittest.TestCase):
         with self.assertRaises(ValueError):
             en.write_line(path, en.enroll_line("masik", key, CMD))
 
-    # ── 4: MEGCÁFOLT — shell-injekció a command=-ba ─────────────────────────
+    # ── 4: REFUTED — shell injection into command= ─────────────────────────
     def test_shell_metacharacters_cannot_enter(self):
         for ident in ("peer; rm -rf /", 'peer" ', "peer$(id)", "../peer", "peer\nmasik"):
             with self.subTest(i=ident):

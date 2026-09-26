@@ -1,16 +1,16 @@
-"""A termék-mód KÉT eldöntője ugyanazt a kérdést válaszolja meg — tehát együtt kell mozdulniuk.
+"""The TWO deciders of product mode answer the same question — so they must move together.
 
-MIÉRT LÉTEZIK EZ A FÁJL. A `bus_enforce.mode()` és az `agent_bus._product_hint()` ugyanazt dönti el:
-termék-módban vagyunk-e. Az első a modul jelenlétében dönt, a második akkor, amikor a modul NEM
-importálható — vagyis a végső őr, ami miatt a hiányzó modul fail-closed és nem csendes dev.
+WHY THIS FILE EXISTS. `bus_enforce.mode()` and `agent_bus._product_hint()` decide the same thing:
+whether we are in product mode. The first decides when the module is present, the second when the module CANNOT be
+imported — i.e. it is the final guard that makes a missing module fail-closed and not silently dev.
 
-A publikált 1.5.3-on mérve: a symlink-javítás (a `realpath` is keresési hely) csak az egyik oldalra
-került be. Ugyanaz a DB, ugyanaz a marker, ugyanaz a hiányzó modul — a valódi úton a `recv` megtagadta
-a kézbesítést, a DB-re mutató symlinken át viszont KIADTA ugyanazokat a leveleket.
+Measured on the published 1.5.3: the symlink fix (`realpath` is also a search location) got into only one
+side. The same DB, the same marker, the same missing module — on the real path `recv` refused
+delivery, but through a symlink pointing to the DB it HANDED OUT the same letters.
 
-Ez nem „elfelejtettünk egy sort" hiba, hanem visszatérő osztály: EGY döntés, KÉT implementáció. Ugyanez
-volt a csomagoló és a pecsét két „shipped" definíciója is. Ezért a teszt nem a TARTALMAT rögzíti (az
-változhat), hanem a KETTŐ EGYEZÉSÉT: ha bármelyik oldal új keresési helyet kap és a másik nem, ez elbukik.
+This is not a "we forgot a line" bug but a recurring class: ONE decision, TWO implementations. The
+packer's and the seal's two "shipped" definitions were the same. So the test does not pin the CONTENT (that
+may change), but that the TWO AGREE: if either side gets a new search location and the other does not, this fails.
 stdlib unittest.
 """
 import os
@@ -41,27 +41,27 @@ class TheTwoDecidersLookAtTheSamePlaces(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_the_search_sets_are_the_same(self):
-        """A LÉNYEG: a két lista ugyanaz a halmaz. Ha az egyik bővül és a másik nem, ez bukik — akkor is,
-        ha egyetlen konkrét forgatókönyvet sem írt meg senki az új helyre."""
+        """THE POINT: the two lists are the same set. If one grows and the other does not, this fails — even
+        if no one wrote a single concrete scenario for the new location."""
         mine = {os.path.normpath(p) for p in ab._product_hint_paths(self.db)}
         theirs = {os.path.normpath(p) for p in be.marker_paths(db=self.db)}
         self.assertEqual(mine, theirs,
-                         "a termék-mód két eldöntője MÁS helyeket néz — a gyengébbik lesz a fail-open")
+                         "the two deciders of product mode look at DIFFERENT locations — the weaker one becomes the fail-open")
 
     def test_a_symlinked_db_is_product_mode_on_both_sides(self):
-        """A konkrét, mért eset: a marker a VALÓDI könyvtárban, a DB symlinken keresztül címezve."""
+        """The concrete, measured case: the marker in the REAL directory, the DB addressed through a symlink."""
         open(os.path.join(self.real, ".product_mode.on"), "w").close()
         self.assertEqual(be.mode(db=self.linked_db), "product")
         self.assertTrue(ab._product_hint(self.linked_db),
-                        "a végső őr nem látja a markert a symlink mögött — a modul hiányában ez fail-open")
+                        "the final guard does not see the marker behind the symlink — without the module this is fail-open")
 
     def test_without_a_marker_neither_side_claims_product(self):
-        """Ellenpróba: a szabály nem 'mindig termék-mód'. Marker nélkül mindkettő dev."""
+        """Counter-check: the rule is not 'always product mode'. Without a marker both are dev."""
         self.assertEqual(be.mode(db=self.linked_db), "dev")
         self.assertFalse(ab._product_hint(self.linked_db))
 
     def test_an_explicit_dev_env_does_not_switch_the_marker_off(self):
-        """A marker a root kezében van, az env bárkiében: `AGENT_BUS_MODE=dev` nem kapcsolhatja vissza."""
+        """The marker is in root's hands, the env in anyone's: `AGENT_BUS_MODE=dev` cannot switch it back."""
         open(os.path.join(self.real, ".product_mode.on"), "w").close()
         os.environ["AGENT_BUS_MODE"] = "dev"
         try:

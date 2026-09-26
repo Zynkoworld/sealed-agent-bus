@@ -193,7 +193,7 @@ class SessionLockLiveness(unittest.TestCase):
         """A non-live target at the moment of acquire → `target-not-live`, and the lock file is NOT created
         (a lock written with a never-live target would immediately be stale for everyone else → an exclusivity violation)."""
         lock = sf.SessionLock("t4", bridge=self.tmp.name, is_alive=lambda pid: True, target_alive=lambda t: False)
-        st, _ = lock.acquire("w1", target="nincs:0.0")
+        st, _ = lock.acquire("w1", target="nosuch:0.0")
         self.assertEqual(st, "target-not-live")
         self.assertIsNone(lock.holder())
 

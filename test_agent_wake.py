@@ -1,4 +1,4 @@
-"""agent_wake + bekötései (bus_poke, agent_bus_watcher): SZENT gépelés, SLEEP-SAFE, operátori WAKE. stdlib unittest."""
+"""agent_wake + its wiring (bus_poke, agent_bus_watcher): SACRED typing, SLEEP-SAFE, operator WAKE. stdlib unittest."""
 import os
 import sys
 import tempfile
@@ -13,7 +13,7 @@ DIM, RST = "\x1b[2m", "\x1b[0m"
 
 
 class FakeTmux:
-    """tmux-hívások rögzítése; a capture-pane egymás utáni kimenetei `panes`-ből jönnek (az utolsó ismétlődik)."""
+    """Recording tmux calls; the successive outputs of capture-pane come from `panes` (the last one repeats)."""
 
     def __init__(self, panes, claude_pane=True):
         self.panes = list(panes)
@@ -52,7 +52,7 @@ class PromptState(unittest.TestCase):
         self.assertEqual(aw.prompt_input_state("valami kimenet\n❯ \n"), "empty")
 
     def test_typed_text_is_typed(self):
-        self.assertEqual(aw.prompt_input_state("❯ folytasd a mérést"), "typed")
+        self.assertEqual(aw.prompt_input_state("❯ continue the measurement"), "typed")
 
     def test_dim_suggestion_is_ghost(self):
         self.assertEqual(aw.prompt_input_state("❯ %sTry \"fix lint\"%s" % (DIM, RST)), "ghost")
@@ -61,19 +61,19 @@ class PromptState(unittest.TestCase):
         self.assertEqual(aw.prompt_input_state("❯ %shint%s x" % (DIM, RST)), "typed")
 
     def test_last_prompt_line_counts(self):
-        self.assertEqual(aw.prompt_input_state("❯ régi\nkimenet\n❯ "), "empty")
+        self.assertEqual(aw.prompt_input_state("❯ old\noutput\n❯ "), "empty")
 
     def test_dead(self):
         self.assertEqual(aw.prompt_input_state(None), "dead")
 
     def test_busy(self):
-        self.assertTrue(aw.is_busy("… dolgozik (esc to interrupt)\n❯ "))
-        self.assertFalse(aw.is_busy("kész\n❯ "))
+        self.assertTrue(aw.is_busy("… working (esc to interrupt)\n❯ "))
+        self.assertFalse(aw.is_busy("done\n❯ "))
 
 
 class SafeSend(Env):
     def test_typing_present_nothing_sent(self):
-        t = FakeTmux(["❯ félig beírt parancs"])
+        t = FakeTmux(["❯ a half-typed command"])
         self.assertEqual(aw.safe_send("a1", "a1:0.0", "poke", run=t, settle=lambda: None), "typed")
         self.assertEqual(t.sends(), [])
         self.assertFalse(any("C-u" in c for c in t.calls))
@@ -91,7 +91,7 @@ class SafeSend(Env):
         self.assertFalse(any("C-u" in c for c in t.calls))
 
     def test_busy_agent_not_poked(self):
-        t = FakeTmux(["fut (esc to interrupt)\n❯ "])
+        t = FakeTmux(["running (esc to interrupt)\n❯ "])
         self.assertEqual(aw.safe_send("a1", "a1:0.0", "poke", run=t, settle=lambda: None), "busy")
         self.assertEqual(t.sends(), [])
 
@@ -179,7 +179,7 @@ class BusPokeIntegration(Env):
         return p
 
     def test_poke_skips_live_typing(self):
-        t = FakeTmux(["❯ az operátor éppen ír"])
+        t = FakeTmux(["❯ the operator is typing right now"])
         with mock.patch.object(self.bp, "BRIDGE", self.tmp.name):
             self.assertEqual(self._poker(t).on_new(1, now_ns=10**12), "typed")
         self.assertEqual(t.sends(), [])
@@ -208,7 +208,7 @@ class WatcherIntegration(Env):
 
 
 class WakeDirDerivation(unittest.TestCase):
-    """a watcher WAKE_DIR-je az AGENT_BRIDGE_DIR-ből származik, a hívás idején."""
+    """the watcher's WAKE_DIR derives from AGENT_BRIDGE_DIR, at call time."""
 
     def test_wake_dir_follows_bridge_dir_when_no_override(self):
         import agent_bus_watcher as w
@@ -229,7 +229,7 @@ class WakeDirDerivation(unittest.TestCase):
 
 
 class JointReviewPR1(Env):
-    """H2 és M2 regresszió."""
+    """H2 and M2 regression."""
 
     def _msg(self, sender, kind, body=""):
         return {"id": 1, "sender": sender, "kind": kind, "body": body}

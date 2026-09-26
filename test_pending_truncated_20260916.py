@@ -1,12 +1,12 @@
-"""A CSONKOLT `pending`-mérés harmadik állapot — saját.
+"""A TRUNCATED `pending` measurement is a third state — our own.
 
-A kör-bejegyzés `pending` mezője a kiadásra váró posta darabszáma. A mérés egy limitre megy
-(`MAX_REPLIES * 50 + 1`), és a `+1` épp csonkolás-érzékelőnek készült — de senki nem olvasta.
-Így egy limitbe ütköző, tehát CSONKA mérés pontosan úgy nézett ki, mint egy tiszta kör.
+The round entry's `pending` field is the number of mail items awaiting delivery. The measurement goes up to a limit
+(`MAX_REPLIES * 50 + 1`), and the `+1` was made precisely as a truncation detector — but no one read it.
+So a measurement that hit the limit, i.e. a TRUNCATED one, looked exactly like a clean round.
 
-A javítás a ház szabálya szerint: a csonkolt mérés ugyanaz a harmadik állapot, mint a hiányzó
-(`pending_truncated` a kör-bejegyzésben -> a következő ack `round_pending_unknown` unresolved
-tételt kap, strict/termék-módban `ok:false`).
+The fix per the house rule: a truncated measurement is the same third state as a missing one
+(`pending_truncated` in the round entry -> the next ack gets a `round_pending_unknown` unresolved
+item, `ok:false` in strict/product mode).
 
 stdlib unittest + cryptography.
 """
@@ -23,7 +23,7 @@ import bus_notary as bn  # noqa: E402
 import bus_ssh_exchange as ex  # noqa: E402
 
 
-@unittest.skipUnless(bn.HAVE_CRYPTO, "cryptography szükséges")
+@unittest.skipUnless(bn.HAVE_CRYPTO, "cryptography required")
 class TruncatedPendingIsNotACleanRound(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -43,31 +43,31 @@ class TruncatedPendingIsNotACleanRound(unittest.TestCase):
         self.tmp.cleanup()
 
     def round_cursor(self, n_mail, *, max_replies):
-        """Egy kört futtat `max_replies` kiadási limittel, és visszaadja a kör-bejegyzés gépi mezőjét."""
+        """Runs a round with a `max_replies` delivery limit, and returns the round entry's machine field."""
         for i in range(1, n_mail + 1):
             ab.send("hub", "peer", "m%d" % i, db=self.db, mirror=False)
-        n = bn.Notary(self.log, seed=self.seed, checkpoint_every=1)     # explicit közjegyző (dev-módban nincs env-kulcs)
+        n = bn.Notary(self.log, seed=self.seed, checkpoint_every=1)     # an explicit notary (in dev mode there is no env key)
         with mock.patch.object(ex, "MAX_REPLIES", max_replies):
             ex.exchange("peer", bn.json.dumps({"messages": []}).encode(), db=self.db, notary=n)
         rounds = [e for e in bn.export(self.log, 1)
                   if e.get("type") == "entry" and e.get("kind") == "pickup" and e.get("decision") == "accepted"
                   and isinstance(e.get("cursor"), dict) and "at" in e["cursor"]]
-        self.assertTrue(rounds, "előfeltétel: van kör-bejegyzés gépi mezővel")
+        self.assertTrue(rounds, "precondition: there is a round entry with a machine field")
         return rounds[-1]["cursor"]
 
-    # ── kontroll: a limit alatti mérés TELJES, nincs csonkolás-jelzés ────────
+    # ── control: a measurement below the limit is COMPLETE, no truncation flag ────────
     def test_control_complete_measurement_has_no_flag(self):
         c = self.round_cursor(5, max_replies=1)
-        self.assertEqual(c["pending"], 5, "a limit alatt a mérés pontos")
+        self.assertEqual(c["pending"], 5, "below the limit the measurement is exact")
         self.assertNotIn("pending_truncated", c)
 
-    # ── LELET: a limitbe ütköző mérés CSONKA, és ezt ki kell mondani ─────────
+    # ── FINDING: a measurement hitting the limit is TRUNCATED, and that must be stated ─────────
     def test_truncated_measurement_is_flagged(self):
-        c = self.round_cursor(55, max_replies=1)             # a mérés limitje: 1*50 -> 55 nem fér bele
+        c = self.round_cursor(55, max_replies=1)             # the measurement's limit: 1*50 -> 55 does not fit
         self.assertEqual(c.get("pending_truncated"), 1,
-                         "a csonka `pending`-mérés (%s) tiszta körnek látszott" % c.get("pending"))
+                         "the truncated `pending` measurement (%s) looked like a clean round" % c.get("pending"))
 
-    # ── és a közjegyzői oldalon ugyanaz a harmadik állapot, mint a hiányzó mérés ──
+    # ── and on the notary side the same third state as a missing measurement ──
     def test_truncated_measurement_blocks_a_clean_report(self):
         cur = ab.cursor_of("peer", db=self.db)
         c = self.round_cursor(55, max_replies=1)
@@ -81,7 +81,7 @@ class TruncatedPendingIsNotACleanRound(unittest.TestCase):
                            [{"phase": "request", "sent": [], "ack": ack_to, "received": [], "round": "r1"},
                             {"phase": "outcome", "outcome": "delivered", "round": "r1", "rc": 0}], strict=True)
         self.assertIn("round_pending_unknown", {u["type"] for u in rep["unresolved"]},
-                      "a csonka mérés után a kurzor-lépés némán elfogadott lett (%r)" % (c,))
+                      "after the truncated measurement the cursor step was silently accepted (%r)" % (c,))
         self.assertFalse(rep["ok"])
 
 
