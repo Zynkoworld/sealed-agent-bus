@@ -1,4 +1,4 @@
-"""sds_envelope + agent_bus bekötés: a partner-kar három additív lépése (keret a send-nél, ellenőrzés a recv-nél, kormányzás-híd). stdlib unittest."""
+"""sds_envelope + agent_bus wiring: the partner arm's three additive steps (frame at send, check at recv, governance bridge). stdlib unittest."""
 import hashlib
 import json
 import os
@@ -28,7 +28,7 @@ def _keypair():
 
 
 def make_framed(signers, *, record=None, epoch=3):
-    """signers: [(private_key, pub_hex, role, org)] → keretezett pár érvényes aláírásokkal (SPEC §5 üzenet)."""
+    """signers: [(private_key, pub_hex, role, org)] → a framed pair with valid signatures (SPEC §5 message)."""
     rec = dict(record or {"schema": "capsule-sync/coord/v1", "kind": "endorsement", "tag": "q3",
                           "subject": "sha256:" + "11" * 32, "verdict": "CLAIMED", "prev_record_id": None})
     rec.pop("record_id", None)
@@ -103,7 +103,7 @@ class Verify(unittest.TestCase):
         self.assertEqual(self.v(fr), ("invalid", "domain-hash-mismatch"))
 
     def test_wrong_key_signature_invalid(self):
-        fr = make_framed([(self.k2, self.pub, "arm", "OrgA")])          # issuer=alice kulcsa, aláírás=bob kulcsával
+        fr = make_framed([(self.k2, self.pub, "arm", "OrgA")])          # issuer=alice's key, signature=with bob's key
         self.assertEqual(self.v(fr), ("invalid", "bad-signature"))
 
     def test_wrong_role_binding_invalid(self):
@@ -169,11 +169,11 @@ class BusIntegration(unittest.TestCase):
 
     def test_non_framed_body_rejected_at_send(self):
         with self.assertRaises(ValueError):
-            self.send("alice", "szabad szöveg")
+            self.send("alice", "free text")
         self.assertEqual(ab.recv("carol", db=self.db), [])
 
     def test_other_kinds_unaffected(self):
-        self.send("alice", "szabad szöveg", kind="msg")
+        self.send("alice", "free text", kind="msg")
         rows = ab.recv("carol", db=self.db, verify_sds=True, strict_sds=True)
         self.assertEqual(len(rows), 1)
         self.assertNotIn("sds", rows[0])
@@ -189,12 +189,12 @@ class BusIntegration(unittest.TestCase):
         self.assertEqual([r["sds"] for r in rows], ["valid", "invalid(record-id-mismatch)", "invalid(not-admitted)"])
         strict = ab.recv("carol", db=self.db, strict_sds=True, sds_admission=self.adm_path)
         self.assertEqual([r["sds"] for r in strict], ["valid"])
-        self.assertEqual(len(ab.tail("carol", db=self.db)), 3)          # a DB-ben minden megmarad (no-deletion)
+        self.assertEqual(len(ab.tail("carol", db=self.db)), 3)          # everything stays in the DB (no-deletion)
         self.assertIn("sds:valid", ab._fmt(rows[0]))
 
     def test_cli_refuses_non_framed(self):
         with mock.patch.object(ab, "DB", self.db):
-            rc = ab.main(["send", "--from", "alice", "--to", "carol", "--kind", ab.SDS_KIND, "--body", "nem keret", "--no-mirror"])
+            rc = ab.main(["send", "--from", "alice", "--to", "carol", "--kind", ab.SDS_KIND, "--body", "not a frame", "--no-mirror"])
         self.assertEqual(rc, 2)
 
 

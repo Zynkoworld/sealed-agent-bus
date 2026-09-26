@@ -1,5 +1,5 @@
-"""SSH-szállítás: force-command végpont (identitás-pin, méret-plafon, sds átmenet), korlátozott authorized_keys-sor,
-kliens-kör hamis ssh-val (valódi hostra NEM csatlakozik). stdlib unittest."""
+"""SSH transport: force-command endpoint (identity pin, size ceiling, sds passthrough), restricted authorized_keys line,
+a client round with a fake ssh (it does NOT connect to a real host). stdlib unittest."""
 import json
 import os
 import stat
@@ -72,7 +72,7 @@ class ExchangeTest(_Iso):
         ab.send("hub", "remote1", "r2", db=self.db)
         res = ex.exchange("remote1", "{}", db=self.db)
         self.assertEqual([r["body"] for r in res["replies"]], ["r1", "r2"])
-        again = ex.exchange("remote1", "{}", db=self.db)         # nincs ack → újra kijön (legalább-egyszer)
+        again = ex.exchange("remote1", "{}", db=self.db)         # no ack → it comes out again (at-least-once)
         self.assertEqual(len(again["replies"]), 2)
         top = max(r["id"] for r in res["replies"])
         self.assertEqual(ex.exchange("remote1", json.dumps({"ack": top}), db=self.db)["replies"], [])
@@ -120,7 +120,7 @@ class EnrollTest(unittest.TestCase):
 
 class ClientRoundTripTest(_Iso):
     def _fake_ssh(self, identity):
-        """Hamis ssh: a force-command-ot szimulálja (az identitást Ő pineli), a célhost-argumentumot eldobja."""
+        """A fake ssh: it simulates the force-command (IT pins the identity), and drops the target-host argument."""
         path = os.path.join(self.tmp.name, "fake_ssh.py")
         with open(path, "w") as f:
             f.write(textwrap.dedent("""
@@ -141,7 +141,7 @@ class ClientRoundTripTest(_Iso):
         self.assertEqual(ab.recv("hub", db=self.db)[-1]["sender"], "remote1")
         self.assertEqual(ab.recv("me", db=local_db)[0]["body"], "hello remote")
         res2 = cli.exchange("bus@example.invalid", "me", [], ssh_cmd=self._fake_ssh("remote1"), state_dir=state, db=local_db)
-        self.assertEqual(res2["stored_locally"], 0)             # ack-kel lépett a szerver kurzora → nem jön újra
+        self.assertEqual(res2["stored_locally"], 0)             # the server's cursor stepped with the ack → it does not come again
         self.assertEqual(len(ab.recv("me", db=local_db)), 1)
 
     def test_attachment_over_ssh(self):

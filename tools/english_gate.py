@@ -49,6 +49,8 @@ FILE_VECTORS = {
     # Unicode normalization vectors: the NFC/NFD difference of these exact characters is what is tested
     "test_signed_shape_interop.py": ('"ő"',),
     "test_sds_validator_bypass_20260916.py": ("kávé-operátor",),
+    # non-ASCII input for agent_bus._safe_name (collision-resistant suffix)
+    "test_agent_bus_security.py": ("café",),
     # UTF-8 round-trip input for bus_poke._safe
     "test_poke_hardening_20260916.py": ("árvíztűrő tükörfúrógép\\tvége",),
     # leak-scanner regex inputs: Hungarian case endings, protocol vocabulary, invalid version

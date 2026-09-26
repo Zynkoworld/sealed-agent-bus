@@ -1,4 +1,4 @@
-"""(nem-Claude kar, 2026-09-15 este) leletei a javításon — regressziós tesztek."""
+"""(the non-Claude arm, the evening of 2026-09-15) findings on the fix — regression tests."""
 import json, os, subprocess, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bus_notary
@@ -24,7 +24,7 @@ import test_joint_error_reply_outcome as _m
 
 
 class ClientOutcome(_m.ErrorReplyOutcome):
-    """a partner-kar hamis-ssh keretét használja (setUp/run_round); csak a leletek esetei."""
+    """uses the partner arm's fake-ssh frame (setUp/run_round); only the findings' cases."""
     def test_c1_empty_stdout_is_not_delivered(self):
         self.assertNotEqual(self.run_round("", 0)["outcome"], "delivered")
 

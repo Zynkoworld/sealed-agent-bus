@@ -1,4 +1,4 @@
-"""sce_hook: csak csatlakozási pont — nincs döntő → nincs döntés; hibás döntő → ABORT. stdlib unittest."""
+"""sce_hook: only a hook point — no decider → no decision; a faulty decider → ABORT. stdlib unittest."""
 import os
 import sys
 import types

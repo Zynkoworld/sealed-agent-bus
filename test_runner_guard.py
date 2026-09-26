@@ -1,6 +1,6 @@
-"""Futtató-őr: a `python3 -m unittest discover` a pytest-stílusú (bare `def test_*`) teszteket
-CSENDBEN kihagyja, és „OK"-t ír — ezért a teljes készlet CSAK `python3 -m pytest -q`-val fut le. Ez a teszt unittest
-alatt HANGOSAN bukik, hogy senki ne higgye zöldnek a csonka futást."""
+"""Runner guard: `python3 -m unittest discover` SILENTLY skips pytest-style (bare `def test_*`) tests
+and prints "OK" — so the full suite runs ONLY with `python3 -m pytest -q`. This test fails LOUDLY under
+unittest, so that no one believes the truncated run is green."""
 import os
 import re
 import sys
@@ -23,8 +23,8 @@ class RunnerGuard(unittest.TestCase):
     def test_full_suite_needs_pytest(self):
         bare = _bare_pytest_files()
         if bare and "_pytest" not in sys.modules:
-            self.fail("A teljes tesztkészlet CSAK `python3 -m pytest -q`-val fut le — unittest alatt ezek a fájlok "
-                      "csendben kimaradnak: %s" % ", ".join(bare))
+            self.fail("The full test suite runs ONLY with `python3 -m pytest -q` — under unittest these files "
+                      "are silently left out: %s" % ", ".join(bare))
 
 
 if __name__ == "__main__":

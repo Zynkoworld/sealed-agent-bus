@@ -1,4 +1,4 @@
-"""bus_attach: tartalom-címzett csatolmányok (write-once, dedupe, hash+méret ellenőrzés, darabolt fogadás). stdlib unittest."""
+"""bus_attach: content-addressed attachments (write-once, dedupe, hash+size check, chunked receiving). stdlib unittest."""
 import hashlib
 import json
 import os
@@ -16,7 +16,7 @@ class AttachTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = ba.Store(os.path.join(self.tmp.name, "att"))
-        self.data = json.dumps({"rows": list(range(40000))}).encode()     # > 64 KB: a buszon nem férne át
+        self.data = json.dumps({"rows": list(range(40000))}).encode()     # > 64 KB: it would not fit through the bus
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -54,7 +54,7 @@ class AttachTest(unittest.TestCase):
         dst = ba.Store(os.path.join(self.tmp.name, "dst"))
         chunks = list(self.store.chunks(src, chunk_bytes=100000))
         self.assertGreater(len(chunks), 2)
-        with self.assertRaises(ba.AttachmentError):             # sorrenden kívüli darab
+        with self.assertRaises(ba.AttachmentError):             # an out-of-order chunk
             dst.receive_chunk(src, chunks[1])
         res = None
         for ch in chunks:
@@ -74,7 +74,7 @@ class AttachTest(unittest.TestCase):
                 dst.receive_chunk(src, ch)
         self.assertFalse(dst.has(src))
         kept = [f for _, _, fs in os.walk(dst.root) for f in fs if ".rejected." in f]
-        self.assertTrue(kept)                                    # megőrizve vizsgálatra, nem törölve
+        self.assertTrue(kept)                                    # kept for inspection, not deleted
 
     def test_bus_attachment_kind_requires_descriptor(self):
         tmp = self.tmp.name

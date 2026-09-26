@@ -1,6 +1,6 @@
-"""v1.4 — SCE végponttól végpontig: busz-sor (sds-envelope, record.payload = sce-arm-envelope/v1) → sce_hook →
-döntő. A HAMIS döntő ugyanazt a szerződést valósítja meg, mint az egyik kar adaptere (kar-borítékok be, verdikt ki),
-motor-kód nélkül. Mátrix (SCE-kar megvesztegetése): egy kar nem dönthet; aláíratlan sorból nincs kar."""
+"""v1.4 — SCE end to end: bus row (sds-envelope, record.payload = sce-arm-envelope/v1) → sce_hook →
+decider. The FAKE decider implements the same contract as one arm's adapter (arm envelopes in, verdict out),
+without engine code. Matrix (bribing an SCE arm): one arm cannot decide; an unsigned row gives no arm."""
 import json
 import os
 import sys
@@ -23,8 +23,8 @@ def row(payload, *, sds="valid", rid=1, sender="x"):
 
 
 def fake_decider(envs):
-    """A az egyik kar adapter szerződése, motor nélkül: 3 különböző kar kell, azonos seed; eltérő derive → ABORT;
-    egyező derive, de a jelölt nem utódja a referenciának (itt: cand == 'REGRESS') → REJECT; különben ACCEPT."""
+    """One arm's adapter contract, without the engine: 3 different arms are needed, the same seed; a differing derive → ABORT;
+    a matching derive, but the candidate is not a descendant of the reference (here: cand == 'REGRESS') → REJECT; otherwise ACCEPT."""
     by = {}
     for e in envs:
         if e.get("schema") != sh.ARM_SCHEMA or e.get("arm") not in ARMS or e["arm"] in by:
@@ -76,17 +76,17 @@ class EndToEnd(unittest.TestCase):
 
 
 class RealAdapterOptional(unittest.TestCase):
-    """Ha a partner-kar adaptere importálható, a hook-specen át hiányzó karra ABORT-ot ad. Különben tisztán kihagyva."""
+    """If the partner arm's adapter can be imported, it gives ABORT for a missing arm through the hook spec. Otherwise cleanly skipped."""
 
     def test_real_adapter_missing_arm_aborts(self):
-        root = os.environ.get("SCE_ROOT", "")                           # csak kifejezetten megadott útról
+        root = os.environ.get("SCE_ROOT", "")                           # only from an explicitly given path
         if root and os.path.isdir(root) and root not in sys.path:
             sys.path.insert(0, root)
         try:
             import importlib
             importlib.import_module("app.sce_bus_adapter")
         except Exception as e:                                               # noqa: BLE001
-            self.skipTest("app adapter nem elérhető: %s" % type(e).__name__)
+            self.skipTest("app adapter not available: %s" % type(e).__name__)
         res = sh.decide_rows([row(arm("node"))], spec="app.sce_bus_adapter:decide")
         self.assertEqual(res["verdict"], "ABORT")
 
