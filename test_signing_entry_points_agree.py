@@ -1,32 +1,32 @@
-"""A NÉGY aláírási belépési pont ugyanazt a bájtképet építi — ez a teszt a KETTŐNÉL TÖBB EGYEZÉSÉT köti.
+"""The FOUR signing entry points build the same byte image — this test pins that MORE THAN TWO agree.
 
-MIÉRT LÉTEZIK EZ A FÁJL. Az aláírt bájtkép mezőit négy hely állította elő, mindegyik a saját
-normalizálásával:
+WHY THIS FILE EXISTS. The fields of the signed byte image were produced by four places, each with its own
+normalization:
 
-  1. `agent_bus._a2_content_bytes`      — a kanonikus szabály (a SPEC, és amit a verifikáló számol)
-  2. `agent_bus.sign_for_send`          — a kliens-aláíró
-  3. `bus_ssh_client.sign_outgoing`     — a gépek közti KIMENŐ út
-  4. `bus_ssh_exchange`                 — a gépek közti BEJÖVŐ út
+  1. `agent_bus._a2_content_bytes`      — the canonical rule (the SPEC, and what the verifier computes)
+  2. `agent_bus.sign_for_send`          — the client signer
+  3. `bus_ssh_client.sign_outgoing`     — the cross-machine OUTGOING path
+  4. `bus_ssh_exchange`                 — the cross-machine INCOMING path
 
-A 2–4. mind `kind or "msg"`-ot használt, az 1. `kind or ""`-t. Mérve, mit adott a négy alakra:
+Numbers 2–4 all used `kind or "msg"`, number 1 used `kind or ""`. Measured, what they gave for the four shapes:
 
-    alak             kanonikus     a másik három
-    kind elhagyva    ""            "msg"
+    shape            canonical     the other three
+    kind omitted     ""            "msg"
     kind = ""        ""            "msg"
     kind = null      ""            "msg"
     kind = "msg"     "msg"         "msg"
 
-Vagyis egy SPEC szerint számoló partner aláírása NÉGYBŐL HÁROM alakban megbukott — és nem csendben:
-a busz `presigned: signature does not verify (forged or tampered)`-rel utasította el, tehát egy
-tisztességes partnert HAMISÍTÁSSAL vádolt meg.
+So a partner signing per SPEC failed in THREE OF FOUR shapes — and not silently:
+the bus rejected it with `presigned: signature does not verify (forged or tampered)`, i.e. it accused an
+honest partner of FORGERY.
 
-A három másolat csak VÉLETLENÜL egyezett egymással. Amikor kettőt a specre igazítottam, a másik kettő
-azonnal elvált, és egy teszt bukott — az, amelyik a régi viselkedést rögzítette. Ezért nem a szabály
-átmásolása a javítás, hanem egy `canonical_text_field`, amit mind a négy hív.
+The three copies only matched each other BY CHANCE. When I aligned two with the spec, the other two
+immediately diverged, and a test failed — the one that pinned the old behaviour. So the fix is not copying the rule,
+but a `canonical_text_field` that all four call.
 
-Ez a teszt ezért NEM a normalizálás tartalmát rögzíti (az változhat, kétkaros döntéssel), hanem azt,
-hogy a négy út UGYANAZT adja. Ha bárhová visszakerül egy második normalizálás, ez bukik — akkor is, ha
-arra az alakra senki nem írt külön esetet.
+So this test does NOT pin the content of the normalization (that may change, by a two-arm decision), but
+that the four paths give THE SAME result. If a second normalization gets back in anywhere, this fails — even if
+no one wrote a separate case for that shape.
 stdlib unittest.
 """
 import json
@@ -47,15 +47,15 @@ try:
 except ImportError:                                            # pragma: no cover
     HAVE_CRYPTO = False
 
-#: A négy alak, amiben egy `kind` (vagy `topic`) megérkezhet a drótról.
-SHAPES = [("elhagyva", {}), ("ures string", {"kind": ""}), ("null", {"kind": None}), ("msg", {"kind": "msg"})]
+#: The four shapes in which a `kind` (or `topic`) can arrive from the wire.
+SHAPES = [("omitted", {}), ("empty string", {"kind": ""}), ("null", {"kind": None}), ("msg", {"kind": "msg"})]
 TS = 1758265200123456789
 
 
 class TheFourEntryPointsBuildTheSameBytes(unittest.TestCase):
     def setUp(self):
         if not HAVE_CRYPTO:
-            self.skipTest("a 'cryptography' csomag nincs telepítve")
+            self.skipTest("the 'cryptography' package is not installed")
         self.tmp = tempfile.TemporaryDirectory()
         self.keys = os.path.join(self.tmp.name, "keys")
         os.makedirs(self.keys, mode=0o700)
@@ -74,11 +74,11 @@ class TheFourEntryPointsBuildTheSameBytes(unittest.TestCase):
                                      "body": "x", "in_reply_to": None, "ts": ts, **wire})
 
     def test_the_client_signer_signs_the_canonical_bytes(self):
-        """2. belépési pont a 1. ellen — az EXPLICIT értékekre.
+        """Entry point 2 against 1 — for the EXPLICIT values.
 
-        A kwarg ELHAGYÁSA itt szándékosan kimarad: az API-alapértelmezés (`kind="msg"`) a hívó
-        kényelme, és az `"msg"`-ot ír alá. Az a viselkedés helyes, és külön teszt köti lejjebb —
-        ez a sor azt méri, hogy egy EXPLICIT érték változatlanul jut el a bájtképig."""
+        OMITTING the kwarg is deliberately left out here: the API default (`kind="msg"`) is the caller's
+        convenience, and it signs `"msg"`. That behaviour is correct, and a separate test below pins it —
+        this line measures that an EXPLICIT value reaches the byte image unchanged."""
         for label, wire in SHAPES:
             if "kind" not in wire:
                 continue
@@ -88,39 +88,39 @@ class TheFourEntryPointsBuildTheSameBytes(unittest.TestCase):
                 self.pub.verify(bytes.fromhex(rec["sig"]), self._canonical_bytes(wire))
 
     def test_the_outgoing_machine_path_signs_the_canonical_bytes(self):
-        """3. belépési pont a 1. ellen: amit a kimenő út aláír, a kanonikus bájtképre kell illenie."""
+        """Entry point 3 against 1: what the outgoing path signs must fit the canonical byte image."""
         for label, wire in SHAPES:
             with self.subTest(shape=label):
                 msg = {"to": "hub", "body": "x", "topic": "t", **wire}
                 signed = cli.sign_outgoing("peer", [dict(msg)], sign_key=self.key, keys_dir=self.keys)[0]
-                self.assertIn("sig", signed, "a kimenő út nem írta alá a sort")
-                # A kimenő út SAJÁT `ts`-t bélyegez (a hívó nem adja meg) — a bájtképet azzal kell építeni.
+                self.assertIn("sig", signed, "the outgoing path did not sign the row")
+                # The outgoing path stamps its OWN `ts` (the caller does not give one) — the byte image must be built with that.
                 self.pub.verify(bytes.fromhex(signed["sig"]), self._canonical_bytes(wire, ts=signed["ts"]))
 
     def test_the_incoming_machine_path_reads_the_same_field(self):
-        """4. belépési pont a 1. ellen: a bejövő út ugyanazt a mezőértéket származtatja."""
+        """Entry point 4 against 1: the incoming path derives the same field value."""
         for label, wire in SHAPES:
             with self.subTest(shape=label):
                 self.assertEqual(ab.canonical_text_field(wire.get("kind")),
                                  json.loads(self._canonical_bytes(wire).decode("utf-8"))["kind"])
 
     def test_a_second_normalisation_anywhere_would_break_this(self):
-        """A LÉNYEG, kimondva: a négy út egyetlen függvényből veszi a szabályt. Ha valaki visszatesz egy
-        második normalizálást, a fenti három teszt közül legalább egy bukik — akkor is, ha arra az alakra
-        nem írt senki külön esetet. Ez a sor magát a szabályt méri, hogy a hiba OKA is látszódjon."""
+        """THE POINT, stated: the four paths take the rule from a single function. If someone puts back a
+        second normalization, at least one of the three tests above fails — even if no one wrote a separate
+        case for that shape. This line measures the rule itself, so the CAUSE of the failure shows too."""
         for value, expected in ((None, ""), ("", ""), ("msg", "msg"), (0, ""), (False, ""), ([], "")):
             with self.subTest(value=value):
                 self.assertEqual(ab.canonical_text_field(value), expected)
 
     def test_an_explicit_value_is_never_replaced_by_the_api_default(self):
-        """A kwarg-alapértelmezés (`kind="msg"`) az ELHAGYOTT mező kényelme. Az EXPLICIT üres string a
-        hívó SZÁNDÉKA, és annak kell maradnia — ez volt a lelet magja."""
+        """The kwarg default (`kind="msg"`) is a convenience for an OMITTED field. An EXPLICIT empty string is the
+        caller's INTENT, and must stay so — that was the core of the finding."""
         rec_explicit = ab.sign_for_send(self.key, "peer", "hub", "x", topic="t", kind="", ts=TS)
         rec_omitted = ab.sign_for_send(self.key, "peer", "hub", "x", topic="t", ts=TS)
         self.pub.verify(bytes.fromhex(rec_explicit["sig"]), self._canonical_bytes({"kind": ""}))
         self.pub.verify(bytes.fromhex(rec_omitted["sig"]), self._canonical_bytes({"kind": "msg"}))
         self.assertNotEqual(rec_explicit["sig"], rec_omitted["sig"],
-                            "az explicit üres és az elhagyott kind ugyanazt adja — az egyik normalizálás elnyelte")
+                            "the explicit empty and the omitted kind give the same result — one normalization swallowed it")
 
 
 if __name__ == "__main__":

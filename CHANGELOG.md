@@ -1,178 +1,187 @@
-## [1.5.3] — 2026-09-21 — a csomagoló és a pecsét egyet ért „szállított" alatt; a padló 9/9 őszintén
+## [1.5.5] — 2026-09-26 — translation-only release
 
-Javító kiadás: PONTOSAN a publikált 1.5.2 teljes utó-ellenőrzésének két lelete, semmi más. `PROTOCOL_VERSION` marad 1.5.0, `SCHEMA_VERSION` 1.0.0. Az 1.5.2 tag fagyott; ez az ág arról a commitról indul, három változott fájllal.
+Translation-only release: all Hungarian text translated to English, internal notes moved to `docs/internal-hu/`; no behaviour change. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0; the wire contract, the signed shape and every conformance vector are byte-identical.
 
-- **A PUBLIKÁLT REPÓBÓL MÁS ARTEFAKTUM ÉPÜLT, MINT AMIT ALÁÍRTUNK.** A verifikáló megtanulta, hogy a publikáláskor rákerülő landing-fájlok (`README.md`, `SECURITY.md`, `assets/sab.png`) kívül vannak a pecséten — a CSOMAGOLÓ viszont nem tudta. Ezért a publikált repóból 160 fájl és eltérő artefaktum-hash jött ki, a fejlesztési fából 157 és az aláírt hash. Egy vevő, aki a publikált repóból épít újra, **nem azt az archívumot kapta volna, amit aláírtunk** — pedig ez a termék egyetlen önmagáról szóló ígérete.
-  Javítás: a csomagoló a pecsét listáját OLVASSA, nem egy másolatot tart; teszt követeli, hogy ez **egy** lista legyen, ne két egyező. A döntő próba klónozza a repót, rákommitolja a furniture-t (ahogy a publikálás teszi), és megköveteli, hogy a szállított fájllista változatlan maradjon. **Pontos nevek, nem könyvtár-minta**: egy `assets/**` alakú kivétel magától nő, ahogy a könyvtár telik.
-- **A PADLÓ 9/9 — ŐSZINTÉN, KÜSZÖB-LAZÍTÁS NÉLKÜL.** A `log-write-failure-blocks` mutációja a `raise`-t `pass`-ra cserélte, amitől egy változó hozzárendelés nélkül maradt, és a tesztek `UnboundLocalError`-ral haltak meg: a fa omlott össze, nem az állítás bukott meg. Az 1.5.2 ezt WEAK-ként **kimondta**, és úgy is jelent meg a kiadásban. A recept mostantól `return`-t ad — ez a valódi fail-open, a napló kimarad, a művelet folytatódik —, és a claimet **hat assertion-ölés** bizonyítja, nem járulékos kár.
+- **Scope of "no behaviour change":** code tokens are identical to 1.5.4 (checked mechanically per file, together with the order of every `%`/`{}` format placeholder). What changed is the language of comments, docstrings, docs and user-visible strings: CLI messages, the poke prompt, the feed's `adat=` marker (now `data=`), the Telegram button texts. Tests that asserted on the old wording assert on the new wording; their logic is unchanged.
+- **Kept byte-identical on purpose:** the 27 partner-written and joint-review-line tests (outside authorship is what makes them evidence), and Hungarian test vectors / match strings whose bytes matter (the signed conformance vector, Unicode-normalization inputs, the leak scanner's Hungarian case-ending patterns, the matrix row keywords read by `docs_bind_probe.py`). One verbatim partner test asserts on a Hungarian token (the word for "its parent"), so `agent_wake`'s two parent-directory warnings carry it as a bracketed tag.
+- **Language gate:** `tools/english_gate.py` fails on any Hungarian line outside `docs/internal-hu/`, with an exact, per-file allowlist for the literals above.
+- **The seal:** re-sealed as a NEW version — 1.5.4 is not resealed in place, so each version names exactly one byte set.
 
-## [1.5.2] — 2026-09-21 — a két gép közti csatorna némasága, és a 09-17-i keményítő kör
+## [1.5.3] — 2026-09-21 — the packer and the seal agree on what "shipped" means; the floor is 9/9, honestly
 
-A termék-ág 09-15-én ágazott le, és azóta nem kapta meg a fejlesztési ág köreit. Ez a kiadás behozza őket. `PROTOCOL_VERSION` marad 1.5.0, `SCHEMA_VERSION` 1.0.0.
+Fix release: EXACTLY the two findings of the full post-release check of the published 1.5.2, nothing else. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0. The 1.5.2 tag is frozen; this branch starts from that commit, with three changed files.
 
-- **A KÉT GÉP KÖZTI CSATORNA SÜKET VOLT 09-19 ÓTA.** A fogadó oldal `enforce_reject:unsigned-pinned` okkal dobta el a sorokat — 25 + 7064 sort, **nyomtalanul**: a küldő nem kapott jelzést, a fogadó nem naplózta láthatóan. Javítás: a **küldő a saját gépén írja alá a saját sorát** (`agent_bus.sign_for_send` / `check_presigned`, a csere átadja az előre aláírt sort, a kliens `sign_outgoing`), a busz a regiszter ellen ellenőrzi és **pontosan azt tárolja**; egy pinelt név alatt érkező aláíratlan sor **megnevezett okkal** pattan le a beléptetésnél. Élő próbával igazolva. 15 teszt, mutáns-próbával.
-- **Lekérés-irány (09-20):** a kliens leírókat kér, a tartalom-címzett tár a darabokat adja vissza, körönkénti korlátokkal.
-- **A 09-17-i keményítő kör:** pid-újrahasználat a single-flightban (folyamat-identitás, nem TTL); **HIGH** — távoli végpont nem írhat egy helyi agent nevében (feladó-névtér, és a pinelt név alatti csupasz sor külön osztály); az elhagyott részleges átvitel nem blokkolja örökre a tartalmat; a felügyeleti figyelő VÁRAKOZÓ ága is megkapja a beragadás-receptet; a termék-mód markerét a VALÓDI úton keressük (symlink nem ad dev-módot); az `AUTO_SIGN` nem folyamat-globális többé; az `_audit_cross` KULCS szerint párosít és kétirányú.
-- **Két szándékosan piros szonda KIMONDVA, nem elnémítva.** A partner `ClampLiedFields` két szondája azt méri, hogy a kör-bejegyzés `pending`/`next_id` mezője a vádlott önbevallása, amit a közjegyzői napló önmagában nem cáfol. A szonda igazat mér, ezért **nem írtuk át** (szó szerint szállított bizonyíték); a futtató mondja ki, hogy a pirosuk VÁRT, `strict` módon — ha valaha átmennének, a suite pirosra vált és rákérdez. A korlát lezárása egy réteggel feljebb mérve van: a busz saját, hash-láncolt `cursor_audit` exportjával mindkét hazugság `audit_skipped_contradicts_log`.
-- **A PADLÓ-MOTOR MEGERŐSÍTVE — a bizonyítékunk bizonyítéka volt gyenge.** Egy független kar nem elolvasta, hanem MEGTÁMADTA ezt a fejezetet, és négy valódi rést mért ki. A motor (1) csak a kilépési kódot nézte, így egy állítás, aminek a futása a mutáció előtt ÉS után is `16 bukott / 17 átment` volt, **nulla jelet** hordozott, és mégis bizonyítottnak számított; (2) nem különböztette meg, hogy egy teszt DÖNTÖTT a mutáció ellen, vagy a fa omlott össze egy `UnboundLocalError`-ral; (3) soha nem nézte a másik irányt, ahol a mutáció **feltámaszt** bukó teszteket; (4) `unittest`-tel mért, miközben a csomag pytestet hirdet — két külön gyűjtő. Mind a négy zárva: per-teszt kimenetel-**halmazok** diffje, minden új piros osztályozása (assertion = döntés / exception = járulékos kár), feltámasztásra bukás, és a szállított gyűjtő.
-  Új, harmadik állapot: **WEAK** — a mutáció alkalmazódott és lett piros, de senki nem döntött. Nem pass és nem crash. A 6. kapu-tétel mostantól `floor N/M PROVEN (+k weak: <nevek>)` alakban ír, tehát a „9/9" nem állhat többé olyan halmazra, amiben van csak járulékosan mért sor.
-  **MÉRVE ezen a gépen, rootként: 8 bizonyított, 1 WEAK** (`a naplóírás hibája megállítja a műveletet` — a mutációja csak kivétellel öl).
-- **A padló erőssége függ attól, KI futtatja — és ezt a boríték kimondja.** A szállított tesztek root-tulajdonú kulcs-registryt feltételeznek (ez az őr akadályozza meg, hogy egy helyi felhasználó más nevében helyezzen el kulcsot), ezért nem-root vevőnél ~19 teszt eleve piros, és a halmaz-diff egy eleve bukó teszten nem hordoz jelet. Egy nem-root futás KEVESEBB bizonyított állítást fog jelenteni, mint a borítékban álló szám — ez a bizonyíték tulajdonsága, nem hibája, és a README is kimondja, a hízelgőbb szám helyett.
-- **A publikált boríték megbukott a SAJÁT verifikálóján.** A publikálás után a landing-oldalra kerülő fájlok (`README.md`, `SECURITY.md`, `assets/`) nincsenek a manifestben, és a verifikáló „not in the manifest"-et mondott rájuk — a publikus v1.5.1 ma megbukik a saját ellenőrzésén. Javítás: ezek **pontos NEVEKKEL** kivételek (soha nem könyvtár-mintával: egy könyvtár-alakú kivétel magától nő, ahogy a könyvtár telik), és a verifikáló **kiírja**, mit nem fed a pecsét, ahelyett hogy csendben átlépné. Minden más listázatlan fájl változatlanul bukás, és ha egy furniture-fájl BEKERÜL a manifestbe, onnantól hash-ellenőrzött — mindhárom irány teszttel rögzítve.
-  A manifest `source_commit`-ja az ÉPÍTŐ repóé; egy squash-publikálású tükörben az az objektum nem létezik, és egy független kar jogosan próbálta feloldani („bad object"). A verifikáló mostantól kimondja, hogy a pecsét a **hash-eken** áll, nem a commiton.
-- **SPEC: az aláírt sor (`signed shape v:2`) NORMATÍV leírása a séma-dokumentumba** (`docs/AGENT_BUS_SCHEMA.md` §2b). A hotfix eddig CSAK kódot és tesztet változtatott: egy interop-partnernek kötelező protokoll-elem volt leírás nélkül, a független kar a szállított tesztből és egy docstringből volt kénytelen visszafejteni. A szakasz megadja a nyolc aláírt mezőt sorrendben és az alapértelmezéseket, a két kizárást (`id`, `thread_id`) az indokkal, a kanonizálást, a verdikt-vokabulárt, a kliens-aláírt cserét, és egy futtatható **konformancia-vektort** (seed + bájtkép + sha256 + pubkey + aláírás).
-  Egy interop-csapdát külön kimondtunk, mert MÉRTÜK: a `ts` nanoszekundumban 2⁵³ fölött van, tehát aki a számokat az RFC 8785 JCS szám-szabálya (ECMAScript `Number::toString`, IEEE-754 double) szerint írja ki, `…544` helyett `…552`-t kap — más bájtkép, más aláírás, néma verify-bukás, és a hossz NEM változik, tehát a szokásos ellenőrzés sem fogja. A kanonizálásunk ezen az egy ponton szándékosan nem JCS; minden másban egybeesik vele.
-  A doc nem elhitt, hanem mért: `test_schema_doc_signed_shape.py` újraszámolja a vektort a szállított kóddal, a mezőlistát a `_a2_content_bytes` tényleges kimenetéből vezeti le, és a csapdát is megméri — ha a kód mozdul és a doc nem, ez a teszt piros.
-- **Címke-őr javítva — a mérő volt vak, nem a kód.** A verdikt-címkék halmazát AST-ből vezetjük le; amikor a modul a döntést `_builtin_verify`-ba szervezte, a kinyerő nem követte a delegálást, és „eltűnt státuszt" jelentett, miközben minden címke a helyén volt. A követés mostantól végigmegy a hívási láncon — és rögtön talált egy VALÓDI hiányt: a kód ad egy `unverifiable(no-config-binding)` okot, ami a pinelt listából kimaradt. Ugyanezt az okot egy független review is hiányolta egy kifelé menő dokumentumból 09-19-én; a kézzel gépelt halmaz kétszer ejtette el ugyanazt.
-- **Proveniencia — új `joint-review-line` eredet.** A közös review-vonal 22 tesztfájljáról fájlnévből nem állapítható meg, melyik a partner szondája szó szerint és melyik a mi válaszunk. Egy licenc-állítást nem tippelünk meg: az új címke azt mondja ki, ami igaz (közös vonal, egy vállalkozás, a relicencelési jog ugyanaz), ahelyett hogy hamis pontosságot mutatna.
-- **Csomagolási tisztítás a behozott körön:** az operátor titkos fájljaira mutató abszolút utak a merge-gomb szerszám alapértelmezéseiből a felhasználó saját konfig-könyvtárába kerültek (és használatkor bontjuk ki); a fejlesztési doksikból kikerültek a belső szereplő-nevek; a teszt-fixtúrák címei a dokumentációs tartományba (RFC 5737) költöztek, és a szivárgás-kereső mostantól tudja, hogy egy dokumentációs című nem lehet a miénk.
+- **THE PUBLISHED REPO BUILT A DIFFERENT ARTIFACT THAN THE ONE WE SIGNED.** The verifier had learned that the landing files added at publish time (`README.md`, `SECURITY.md`, `assets/sab.png`) are outside the seal — but the PACKER did not know. So the published repo produced 160 files and a different artifact hash, the development tree 157 and the signed hash. A buyer rebuilding from the published repo **would not have got the archive we signed** — although that is the product's only promise about itself.
+  Fix: the packer READS the seal's list instead of keeping a copy; a test requires this to be **one** list, not two matching ones. The decisive probe clones the repo, commits the furniture onto it (as publishing does), and requires the shipped file list to stay unchanged. **Exact names, not a directory pattern**: an exception shaped like `assets/**` grows by itself as the directory fills up.
+- **THE FLOOR IS 9/9 — HONESTLY, WITHOUT LOOSENING THE THRESHOLD.** The mutation of `log-write-failure-blocks` replaced the `raise` with `pass`, which left a variable unassigned, and the tests died with `UnboundLocalError`: the tree collapsed, the claim did not fail. 1.5.2 **stated** this as WEAK, and it shipped that way. The recipe now gives `return` — that is the real fail-open, the log is skipped, the operation continues — and the claim is proven by **six assertion kills**, not collateral damage.
 
-## [1.5.1] — 2026-09-21 — kiadás-kapu: a vizsgálat annyit ér, amennyit bejár
+## [1.5.2] — 2026-09-21 — the silence of the channel between the two machines, and the 09-17 hardening round
 
-Csomagolás és kiadás-kapu; a busz-szerződés és a kód viselkedése VÁLTOZATLAN. `PROTOCOL_VERSION` marad 1.5.0, `SCHEMA_VERSION` 1.0.0.
+The product branch forked on 09-15 and has not received the development branch's rounds since. This release brings them in. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0.
 
-- **A szivárgás-vizsgálat hatóköre a teljes archívum.** A kapu korábban a 87 szállított fájlból 72-t járt be: saját szűrővel újraszármaztatta a listát, és kihagyta a generált `product/evidence/`-et — abban ült egy elavult suite-napló, ami még törölt privát fájlneveket nevezett meg. Mostantól EGY definíciója van annak, mi megy ki (`make_release.shipped_names`), és a vizsgálat is, a proveniencia-leltár is attól kérdezi meg. Könyvtár-szintű kihagyás nincs; az egyetlen kivétel egy nevesített fájllista (maguk a minta-hordozók).
-- **A szám a verdikt része:** „85 of 87 shipped files walked, 2 exempt as pattern holders". Ha egy szállított fájlt egyetlen séta sem ér el, a tétel megnevezve bukik — teszt zsugorítja vissza a bejárt halmazt és követeli, hogy a kapu észrevegye.
-- **A proveniencia-leltár is a teljes archívumot fedi** (87 fájl): új `generated-here` eredet a saját gépezetünk által előállított boríték-fájloknak. A címkék NÉVEN számolódnak — a korábbi „partner = minden, ami nem first-party" alakú számláló az új kategóriát némán bekebelezte volna; teszt követeli, hogy a címkék összege = total.
-- **A kiadás verziója elvált a protokoll verziójától** (`product/version.py`). A protokoll-verzió kimegy a drótra, tehát egy csomagolási javítás nem billentheti: a 3. kapu-tétel mostantól a kiadás-verzió pontos egyezését kéri az argumentummal és a boríték-manifesttel, a protokolltól pedig csak azt, hogy ugyanazon a MAJOR.MINOR vonalon legyen.
+- **THE CHANNEL BETWEEN THE TWO MACHINES HAD BEEN DEAF SINCE 09-19.** The receiving side dropped rows with the reason `enforce_reject:unsigned-pinned` — 25 + 7064 rows, **without a trace**: the sender got no signal, the receiver did not log it visibly. Fix: the **sender signs its own row on its own machine** (`agent_bus.sign_for_send` / `check_presigned`, the exchange passes the pre-signed row on, client `sign_outgoing`), the bus checks it against the registry and **stores exactly that**; an unsigned row arriving under a pinned name bounces at admission **with a named reason**. Verified with a live probe. 15 tests, with a mutant probe.
+- **Pull direction (09-20):** the client requests descriptors, the content-addressed store returns the chunks, with per-round limits.
+- **The 09-17 hardening round:** pid reuse in single-flight (process identity, not TTL); **HIGH** — a remote endpoint cannot write in the name of a local agent (sender namespace, and a bare row under a pinned name is a separate class); an abandoned partial transfer no longer blocks the content forever; the supervisor watcher's WAITING branch also gets the stuck recipe; the product-mode marker is looked up on the REAL path (a symlink does not give dev mode); `AUTO_SIGN` is no longer process-global; `_audit_cross` pairs BY KEY and is two-way.
+- **Two deliberately red probes STATED, not silenced.** The partner's two `ClampLiedFields` probes measure that the round entry's `pending`/`next_id` field is the accused's self-report, which the notary log alone does not refute. The probe measures the truth, so **we did not rewrite it** (evidence shipped verbatim); the runner states that their red is EXPECTED, in `strict` mode — should they ever pass, the suite turns red and asks. Closing the limit is measured one layer up: with the bus's own hash-chained `cursor_audit` export both lies are `audit_skipped_contradicts_log`.
+- **THE FLOOR ENGINE STRENGTHENED — the evidence for our evidence was weak.** An independent arm did not read this chapter but ATTACKED it, and measured four real gaps. The engine (1) looked only at the exit code, so a claim whose run was `16 failed / 17 passed` both before AND after the mutation carried **zero signal**, and still counted as proven; (2) did not distinguish whether a test DECIDED against the mutation or the tree collapsed with an `UnboundLocalError`; (3) never looked the other way, where the mutation **revives** failing tests; (4) measured with `unittest` while the package advertises pytest — two different collectors. All four closed: a diff of per-test outcome **sets**, classification of every new red (assertion = decision / exception = collateral damage), failure on revival, and the shipped collector.
+  A new, third state: **WEAK** — the mutation applied and went red, but no one decided. Not a pass and not a crash. Gate item 6 now writes `floor N/M PROVEN (+k weak: <names>)`, so "9/9" can no longer stand for a set that contains a row measured only collaterally.
+  **MEASURED on this machine, as root: 8 proven, 1 WEAK** (`a log-write failure stops the operation` — its mutation kills only with an exception).
+- **The floor's strength depends on WHO runs it — and the envelope says so.** The shipped tests assume a root-owned key registry (this guard prevents a local user from planting a key in someone else's name), so for a non-root buyer ~19 tests are red from the start, and the set diff carries no signal on a test that fails from the start. A non-root run will report FEWER proven claims than the number in the envelope — that is a property of the evidence, not a flaw, and the README says so, instead of the more flattering number.
+- **The published envelope failed its OWN verifier.** The files added to the landing page after publishing (`README.md`, `SECURITY.md`, `assets/`) are not in the manifest, and the verifier said "not in the manifest" about them — the public v1.5.1 fails its own check today. Fix: these are exceptions by **exact NAMES** (never by directory pattern: a directory-shaped exception grows by itself as the directory fills up), and the verifier **prints** what the seal does not cover, instead of silently skipping it. Every other unlisted file is still a failure, and if a furniture file GETS INTO the manifest, it is hash-checked from then on — all three directions pinned by tests.
+  The manifest's `source_commit` belongs to the BUILD repo; in a squash-published mirror that object does not exist, and an independent arm rightly tried to resolve it ("bad object"). The verifier now states that the seal rests on the **hashes**, not on the commit.
+- **SPEC: a NORMATIVE description of the signed row (`signed shape v:2`) in the schema document** (`docs/AGENT_BUS_SCHEMA.md` §2b). The hotfix had changed ONLY code and tests: a mandatory protocol element for an interop partner had no description, and the independent arm had to reverse-engineer it from the shipped test and a docstring. The section gives the eight signed fields in order and the defaults, the two exclusions (`id`, `thread_id`) with the reason, the canonicalization, the verdict vocabulary, the client-signed exchange, and a runnable **conformance vector** (seed + byte image + sha256 + pubkey + signature).
+  One interop trap is stated separately, because we MEASURED it: `ts` in nanoseconds is above 2⁵³, so whoever writes the numbers per the RFC 8785 JCS number rule (ECMAScript `Number::toString`, IEEE-754 double) gets `…552` instead of `…544` — a different byte image, a different signature, a silent verify failure, and the length does NOT change, so the usual check will not catch it either. Our canonicalization is deliberately not JCS on this one point; in everything else it coincides with it.
+  The doc is not believed but measured: `test_schema_doc_signed_shape.py` recomputes the vector with the shipped code, derives the field list from the actual output of `_a2_content_bytes`, and measures the trap too — if the code moves and the doc does not, this test is red.
+- **Label guard fixed — the meter was blind, not the code.** We derive the set of verdict labels from the AST; when the module moved the decision into `_builtin_verify`, the extractor did not follow the delegation and reported a "vanished status" while every label was in place. Following now walks the call chain — and it immediately found a REAL gap: the code gives an `unverifiable(no-config-binding)` reason that was missing from the pinned list. An independent review had also missed the same reason from an outbound document on 09-19; the hand-typed set dropped the same thing twice.
+- **Provenance — a new `joint-review-line` origin.** For the 22 test files of the joint review line it cannot be determined from the file name which is the partner's probe verbatim and which is our answer. We do not guess a licence claim: the new label states what is true (a joint line, one business, the same relicensing right), instead of showing false precision.
+- **Packaging cleanup on the imported round:** absolute paths pointing to the operator's secret files moved from the merge-button tool's defaults into the user's own config directory (and are expanded at use); internal actor names were removed from the development docs; test-fixture addresses moved into the documentation range (RFC 5737), and the leak finder now knows that a documentation address cannot be ours.
 
-## [1.5.0] — 2026-09-14 — közjegyzői napló (notary log)
+## [1.5.1] — 2026-09-21 — release gate: a check is worth as much as it walks
 
-A v1.4 két nyitott maradéka: a visszadátumozás az ablakon BELÜL és a mátrix (a napló átírása legyen kimutatható, és az ellenőrzés fusson rendszeresen — két félnél).
+Packaging and release gate; the bus contract and the code's behaviour are UNCHANGED. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0.
 
-- **Új: `bus_notary.py` + `test_bus_notary.py` (20 teszt).** Append-only, hash-láncolt JSONL: `{seq, prev_hash, received_at_ms, envelope_sha256, sender_identity, sender_auth, recipient, kind, decision, reason, claimed_ts_ms}`, `entry_hash = sha256(JCS(bejegyzés))`; N bejegyzésenként aláírt ellenőrzőpont `{seq, head_hash, ts_ms, notary_pub, sig}` (Ed25519). flock-kal folyamatok közt szerializált, fsync.
-- **Export / offline verify / compare:** `export --from SEQ` (+ a legutolsó aláírt ellenőrzőpont); `verify` újraszámolja a láncot (átírás → hibás hash az adott seq-nél; teljes újraláncolás → az aláírt head nem egyezik; törlés → rés; átrendezés), ellenőrzi az aláírást és a megbízott kulcsot; `compare` a közös seq-tartományon bájtra, első eltérő seq-kel.
-- **Visszadátumozás:** a feladó állított ideje (üzenet `ts`, SDS-rekord `ts`, relay-boríték `ts`; s/ms/µs/ns → ms) a fogadási időhöz mérve; ami az ablaknál régebbi → `backdated` (bizonyítékként a naplóban marad, nem dobjuk el).
-- **Integráció:** `bus_ssh_exchange` üzenetenként és csatolmányonként (`sender_auth=ssh-key`); `bus_relay` `/deliver` (`unauthenticated-claim` — a `from` ott nem hitelesített, így is címkézve) és `/pickup` (`pickup-sig` / elutasítva). Sealed `ct` és nyílt törzs sosem kerül a naplóba (teszttel).
-- **Mód:** termék-módban kötelező, kikapcsolhatatlan; cryptography vagy kulcs nélkül fail-closed (exchange: `notary unavailable (fail-closed)`, írási hiba → `notary write failed (fail-closed)`, a hátralévő tételek nem mennek át; relay: indulás megtagadva, írási hiba → 503 és a boríték nem marad a spoolban). Dev-módban alapból ki (a v1.4 viselkedés változatlan), `AGENT_BUS_NOTARY=on`.
-- Külön napló-fájl → **SCHEMA_VERSION marad 1.0.0**; `PROTOCOL_VERSION` 1.5.0.
-- **Javítás — 23Z):** `verify` `--pub` nélkül egy idegen kulccsal aláírt, önmagában konzisztens hamis láncot is `ok:true`-nak adott, és a report nem mutatta az aláírót. Most: ellenőrzőpontonként `notary_pub` + `trusted`; felső szinten `trusted` (csak megbízott `--pub`-bal lehet igaz), `signer_unverified`, `signers`. CLI `--pub` nélkül: dev-módban stderr-figyelmeztetés; **termék-módban megtagadás (rc=2)**. 3 új teszt.
-- **Javítás — 25Z):** ellenőrzőpont nélküli szelet (friss napló <N bejegyzése, vagy a következő ellenőrzőpont előtti export) a HELYES `--pub`-bal `trusted:true`, `signer_unverified:false` választ kapott, pedig egyetlen aláírás sem ellenőrződött (termék-módban is). Most `trusted` csak akkor igaz, ha legalább egy ellenőrzőpont a megbízott kulccsal ténylegesen ellenőrződött és egy exportált bejegyzéshez kötődik; új mezők: `checkpoint_count`, `verified_checkpoint_count`, `covered_to_seq`, `unverified_tail`, `no_checkpoint_in_range`. CLI: ilyen szeletre dev-módban figyelmeztetés (rc=0, `trusted:false`), **termék-módban megtagadás (rc=3)**; ellenőrizetlen farokról stderr-megjegyzés. 3 új teszt (`test_M6b_*`).
-- Teszt: **205 passed, 1 skipped** (a v1.4 + -javítás merge és a javítások után).
+- **The leak scan's scope is the whole archive.** The gate used to walk 72 of the 87 shipped files: it re-derived the list with its own filter and skipped the generated `product/evidence/` — which held a stale suite log that still named deleted private file names. Now there is ONE definition of what goes out (`make_release.shipped_names`), and both the scan and the provenance inventory ask it. There is no directory-level skip; the only exception is a named file list (the pattern holders themselves).
+- **The number is part of the verdict:** "85 of 87 shipped files walked, 2 exempt as pattern holders". If no walk reaches a shipped file, the item fails by name — a test shrinks the walked set back and requires the gate to notice.
+- **The provenance inventory also covers the whole archive** (87 files): a new `generated-here` origin for envelope files produced by our own machinery. Labels are counted BY NAME — the earlier counter shaped "partner = everything that is not first-party" would have silently swallowed the new category; a test requires the sum of labels = total.
+- **The release version is separate from the protocol version** (`product/version.py`). The protocol version goes out on the wire, so a packaging fix must not bump it: gate item 3 now requires the release version to match the argument and the envelope manifest exactly, and of the protocol only that it be on the same MAJOR.MINOR line.
 
-## [1.4.0] — 2026-09-14 — kikényszerítés (termék-mód)
+## [1.5.0] — 2026-09-14 — notary log
 
-Egy független támadási mátrix (v0) fő lelete alapján: a gyengeség nem kriptográfiai, hanem kikényszerítési (a busz annotált, a default megengedte az aláírás elhagyását).
+v1.4's two open residuals: backdating WITHIN the window, and the matrix (rewriting the log must be detectable, and the check must run regularly — at two parties).
 
-- **Új: `bus_enforce.py` + `test_bus_enforce.py` (15 teszt).** Termék-mód: `AGENT_BUS_MODE=product` vagy `.product_mode.on`. A recv ELUTASÍTJA: aláíratlan (`unsigned-downgrade`, ), hamis / kulcs-eltérés (`forged`, ), ablakon kívüli ts (`stale-ts` / `future-ts`, ; alap −300 s / +60 s), visszajátszott tartalom (`replay`, — tartós seen-tár, új folyamatban is), hiányos csatolmány-leíró (`attachment-descriptor`, ). Termék-módban az sds-envelope kötelezően ellenőrzött, csak valid marad.
-- **Alapértelmezés: dev** (a v1.3 viselkedés bájtra változatlan) — az élő flotta nem törik el. **A termék-/kiadási profil a product módot állítja be.** `abus doctor`: dev módban hangos figyelmeztetés, rc=1.
-- **Semmi nem törlődik:** az elutasított sor a DB-ben marad; az ok a `enforce/rejected.jsonl`-ben. A seen-tár külön append-only fájl → **SCHEMA_VERSION marad 1.0.0**.
-- **`bus_relay`: tartós lehúzási nonce-tár** (a spool mellett) — a v1.2 „újraindítás utáni egyszeri visszajátszás" kockázata zárva . 2 új teszt.
-- **`sce_hook`: dokumentált leképezés** busz-sor → `sce-arm-envelope/v1` (a SDS record `payload` mezője) + `decide_rows`; végponttól végpontig teszt (8) hamis döntővel és opcionálisan a valódi külső adapterrel .
-- **`agent_duty`:** a látható futó háttér-shell munkának számít (1 új teszt).
-- `PROTOCOL_VERSION` 1.4.0 (MINOR). Teszt: **128 passed** (102 + 26).
-- **review javításai (2026-09-14):**
-  - a kikényszerítés a recv kurzor-tranzakcióján BELÜL, a kurzor előtt fut; az elutasított sor nem emeli a `delivered_id`-t, `read_at` NULL marad, `enforce_reject:<ok>` audit-sort kap → a `reconcile`/`replay` látja. Alap ts-ablak **−7 nap / +300 s** (a replay-tár fogja a duplát ablak nélkül is).
-  - termék-módban a JSON-tükör csak aláírt sorra fut és hordozza a `sig`/`pubkey`-t; `tools/inbox_watch.sh` termék-módban megtagadja a futást (rc=3).
-  - a marker a DB-fájl mellett és `/etc/agent-bus/product_mode.on` alatt is keresett (unió) — env-vel (AGENT_BRIDGE_DIR/AGENT_BUS_DIR/AGENT_BUS_MODE=dev) nem kapcsolható vissza; az ablak-env csak szűkíthet. ismeretlen `AGENT_BUS_MODE` érték → product.
-  - /a kézbesítő recv seen-tára a DB-ben (`enforce_seen`, lusta tábla, a kurzorral atomi) — a fájl törlése nem nyitja újra a replayt, más UID nem ütközik fájl-jogosultságba; `rejected.jsonl` best-effort. Relay: hiányzó nonce-tár esetén az indulás előtti kérés elutasítva.
-  - `recv_mark` audit `skipped` = elutasítottak száma. stderr-összegzés (peeknél is). `bus_enforce` opcionális import (termék-jelnél fail-closed). `agent_duty` SHELLS csak a `⏵⏵` státuszsoron, ≥1. recv-integrációs peek-teszt + ablak-pin. kikényszerítési hiba → fail-closed, kurzor nem mozdul, nincs traceback.
-  - Teszt: **174 passed, 1 skipped** (+21 regressziós teszt).
+- **New: `bus_notary.py` + `test_bus_notary.py` (20 tests).** Append-only, hash-chained JSONL: `{seq, prev_hash, received_at_ms, envelope_sha256, sender_identity, sender_auth, recipient, kind, decision, reason, claimed_ts_ms}`, `entry_hash = sha256(JCS(entry))`; a signed checkpoint every N entries `{seq, head_hash, ts_ms, notary_pub, sig}` (Ed25519). Serialized across processes with flock, fsync.
+- **Export / offline verify / compare:** `export --from SEQ` (+ the latest signed checkpoint); `verify` recomputes the chain (rewrite → wrong hash at that seq; full re-chaining → the signed head does not match; deletion → gap; reordering), checks the signature and the trusted key; `compare` byte for byte over the shared seq range, with the first differing seq.
+- **Backdating:** the sender's claimed time (message `ts`, SDS record `ts`, relay envelope `ts`; s/ms/µs/ns → ms) measured against the receive time; anything older than the window → `backdated` (it stays in the log as evidence, we do not drop it).
+- **Integration:** `bus_ssh_exchange` per message and per attachment (`sender_auth=ssh-key`); `bus_relay` `/deliver` (`unauthenticated-claim` — `from` is not authenticated there, and is labelled so) and `/pickup` (`pickup-sig` / rejected). A sealed `ct` and a plaintext body never enter the log (tested).
+- **Mode:** mandatory in product mode, cannot be switched off; fail-closed without cryptography or a key (exchange: `notary unavailable (fail-closed)`, write error → `notary write failed (fail-closed)`, the remaining items do not go through; relay: start refused, write error → 503 and the envelope does not stay in the spool). Off by default in dev mode (v1.4 behaviour unchanged), `AGENT_BUS_NOTARY=on`.
+- A separate log file → **SCHEMA_VERSION stays 1.0.0**; `PROTOCOL_VERSION` 1.5.0.
+- **Fix — 23Z):** without `--pub`, `verify` returned `ok:true` even for a self-consistent fake chain signed with a foreign key, and the report did not show the signer. Now: per checkpoint `notary_pub` + `trusted`; at the top level `trusted` (can only be true with a trusted `--pub`), `signer_unverified`, `signers`. CLI without `--pub`: a stderr warning in dev mode; **refusal in product mode (rc=2)**. 3 new tests.
+- **Fix — 25Z):** a slice without a checkpoint (<N entries of a fresh log, or an export before the next checkpoint) got `trusted:true`, `signer_unverified:false` with the CORRECT `--pub`, although no signature was verified (in product mode too). Now `trusted` is true only if at least one checkpoint was actually verified with the trusted key and binds to an exported entry; new fields: `checkpoint_count`, `verified_checkpoint_count`, `covered_to_seq`, `unverified_tail`, `no_checkpoint_in_range`. CLI: for such a slice a warning in dev mode (rc=0, `trusted:false`), **refusal in product mode (rc=3)**; a stderr note about an unverified tail. 3 new tests (`test_M6b_*`).
+- Tests: **205 passed, 1 skipped** (after the v1.4 + fix merge and the fixes).
 
-## [1.3.1] — javításai
+## [1.4.0] — 2026-09-14 — enforcement (product mode)
 
-- **** a hiányzó/sérült ügyeletes-kijelölés `unknown` (rc=2, riasztás óránként), a szándékos „nincs ügyeletes" `no-duty` — egyik sem azonos a „minden rendben" `none`-nal.
-- **** a „dolgozik" szövegminta mellé változás-bizonyíték: ha a busy-panel `busy_stuck_min` (alap 60) percig bájtra változatlan → `alert` („beragadt?").
-- **** fali-óra ugrás ellen monoton órás összevetés; ugrásnál a tárolt időbélyegek eltolódnak, az eltelt idő megmarad.
-- **/ ** pontos határteszt az enter-cooldownra (240 s), a done-küszöbre (5 perc), az alert-küszöbre és a halott-panel riasztásra (20 perc).
-- **** agent/topic-váltás tesztelve (az előzmény törlődik).
-- **** alapértelmezett `count_reports_inbox` (a felügyelő JSON-tükör inboxa) és valódi `bus_send` a `__main__`-ben.
-Teszt: `test_agent_duty.py::MateReviewPR3` (11) — a javítás előtt 7 bukott.
+Based on the main finding of an independent attack matrix (v0): the weakness is not cryptographic but one of enforcement (the bus annotated, and the default allowed omitting the signature).
 
-## [1.3.0] — 2026-09-14 — ügyelet (agent_duty)
+- **New: `bus_enforce.py` + `test_bus_enforce.py` (15 tests).** Product mode: `AGENT_BUS_MODE=product` or `.product_mode.on`. recv REJECTS: unsigned (`unsigned-downgrade`, ), forged / key mismatch (`forged`, ), ts outside the window (`stale-ts` / `future-ts`, ; default −300 s / +60 s), replayed content (`replay`, — durable seen-store, also across processes), incomplete attachment descriptor (`attachment-descriptor`, ). In product mode the sds-envelope is mandatorily checked, only valid ones remain.
+- **Default: dev** (v1.3 behaviour byte-identical) — the live fleet does not break. **The product/release profile sets product mode.** `abus doctor`: a loud warning in dev mode, rc=1.
+- **Nothing is deleted:** a rejected row stays in the DB; the reason is in `enforce/rejected.jsonl`. The seen-store is a separate append-only file → **SCHEMA_VERSION stays 1.0.0**.
+- **`bus_relay`: durable pickup nonce store** (next to the spool) — v1.2's "one-time replay after restart" risk closed . 2 new tests.
+- **`sce_hook`: a documented mapping** bus row → `sce-arm-envelope/v1` (the SDS record's `payload` field) + `decide_rows`; an end-to-end test (8) with a fake decider and optionally the real external adapter .
+- **`agent_duty`:** a visible running background shell counts as work (1 new test).
+- `PROTOCOL_VERSION` 1.4.0 (MINOR). Tests: **128 passed** (102 + 26).
+- **review fixes (2026-09-14):**
+  - enforcement runs INSIDE recv's cursor transaction, before the cursor; a rejected row does not raise `delivered_id`, `read_at` stays NULL, it gets an `enforce_reject:<reason>` audit row → `reconcile`/`replay` see it. Default ts window **−7 days / +300 s** (the replay store catches duplicates even without a window).
+  - in product mode the JSON mirror runs only for a signed row and carries `sig`/`pubkey`; `tools/inbox_watch.sh` refuses to run in product mode (rc=3).
+  - the marker is looked up next to the DB file and under `/etc/agent-bus/product_mode.on` too (union) — it cannot be switched back with env (AGENT_BRIDGE_DIR/AGENT_BUS_DIR/AGENT_BUS_MODE=dev); the window env can only narrow. An unknown `AGENT_BUS_MODE` value → product.
+  - /the delivering recv's seen-store is in the DB (`enforce_seen`, lazy table, atomic with the cursor) — deleting the file does not reopen replay, another UID does not hit file permissions; `rejected.jsonl` is best-effort. Relay: with a missing nonce store, a request before start is rejected.
+  - `recv_mark` audit `skipped` = number rejected. A stderr summary (on peek too). `bus_enforce` is an optional import (fail-closed on a product signal). `agent_duty` SHELLS only on the `⏵⏵` status line, ≥1. A recv integration peek test + window pin. An enforcement error → fail-closed, the cursor does not move, no traceback.
+  - Tests: **174 passed, 1 skipped** (+21 regression tests).
 
-- **Új: `agent_duty.py` + `test_agent_duty.py` (11 teszt).** A munkasor aktív agentjét figyeli: dolgozik-e.
-  - beragadt SAJÁT ébresztő a promptban → egy Enter (előtag-egyezés; más szöveg szent);
-  - tétlen, üres prompt ≥10 perc → egy fix szövegű bökés (`agent_wake.safe_send`);
-  - a bökés után ≥20 perc sem indul, vagy nincs panel → riasztás (óránként legfeljebb egy, cserélhető értesítővel);
-  - ha az ébresztés óta jelentett és tétlen → a felügyelő kap jelzést, hogy léptesse a sort — a kész agentet nem bökdösi;
-  - sleep-safe alatt néma; jóváhagyásra váró panelhez nem nyúl; a sort nem lépteti magától.
-- **Miért:** 2026-09-14 reggel a flottában az ébresztő szövege a tmux-promptban ragadt (az Enter elveszett), és órákig senki nem dolgozott, miközben a sor szerint egy agentnek kellett volna.
-- `PROTOCOL_VERSION` 1.3.0 (MINOR: új modul, busz-szerződés változatlan).
+## [1.3.1] — fixes
+
+- **** a missing/damaged duty assignment is `unknown` (rc=2, alert hourly), a deliberate "no one on duty" is `no-duty` — neither is the same as the "all fine" `none`.
+- **** evidence of change alongside the "working" text pattern: if the busy pane stays byte-identical for `busy_stuck_min` (default 60) minutes → `alert` ("stuck?").
+- **** a monotonic-clock comparison against wall-clock jumps; on a jump the stored timestamps shift, the elapsed time is preserved.
+- **/ ** exact boundary tests for the enter cooldown (240 s), the done threshold (5 minutes), the alert threshold and the dead-pane alert (20 minutes).
+- **** agent/topic switch tested (the history is cleared).
+- **** the default `count_reports_inbox` (the supervisor's JSON mirror inbox) and a real `bus_send` in `__main__`.
+Tests: `test_agent_duty.py::MateReviewPR3` (11) — 7 failed before the fix.
+
+## [1.3.0] — 2026-09-14 — duty (agent_duty)
+
+- **New: `agent_duty.py` + `test_agent_duty.py` (11 tests).** Watches the active agent of the work queue: is it working.
+  - its OWN wake-up text stuck in the prompt → one Enter (prefix match; other text is sacred);
+  - idle, empty prompt ≥10 minutes → one fixed-text poke (`agent_wake.safe_send`);
+  - still not started ≥20 minutes after the poke, or no pane → alert (at most one per hour, with a swappable notifier);
+  - if it has reported since the wake-up and is idle → the supervisor gets a signal to advance the queue — a finished agent is not poked;
+  - silent under sleep-safe; does not touch a pane awaiting approval; does not advance the queue by itself.
+- **Why:** on the morning of 2026-09-14 the fleet's wake-up text got stuck in the tmux prompt (the Enter was lost), and no one worked for hours, although per the queue one agent should have.
+- `PROTOCOL_VERSION` 1.3.0 (MINOR: new module, bus contract unchanged).
 
 # CHANGELOG — AgentBus
 
-## [1.2.1] — javításai
+## [1.2.1] — fixes
 
-- **HIGH — `/deliver` flood:** beépített, fail-closed korlátok a relayben MÉG a proxy előtt: csak a registryben szereplő címzettnek fogad (ismeretlen → 404), címzettenkénti percenkénti ráta (`AGENT_BUS_RELAY_MAX_PER_MIN`, alap 120), címzettenkénti várakozó-plafon (`AGENT_BUS_RELAY_MAX_PENDING`, alap 200), teljes spool-plafon (`AGENT_BUS_RELAY_MAX_SPOOL`, alap 5000) → 429. Teszt: `test_bus_relay.py::test_H_deliver_*` (a külső review 500-as reprójával; a javítás előtt 3 teszt bukott).
-- **Nyilvános kitétel:** a relay továbbra is CSAK TLS-t végző és rate-limitelő proxy mögött tehető ki; a beépített korlát a kézbesíthetőséget védi, nem helyettesíti a proxyt (README).
-- LOW (nonce-cache perzisztencia) → a v1.4 zárja; LOW (forward secrecy) és INFO (CI, vegyes tesztstílus) → nyitott, ld. a v1.4 fejlesztési naplóját.
+- **HIGH — `/deliver` flood:** built-in, fail-closed limits in the relay EVEN before the proxy: accepts only recipients in the registry (unknown → 404), a per-recipient per-minute rate (`AGENT_BUS_RELAY_MAX_PER_MIN`, default 120), a per-recipient pending ceiling (`AGENT_BUS_RELAY_MAX_PENDING`, default 200), a total spool ceiling (`AGENT_BUS_RELAY_MAX_SPOOL`, default 5000) → 429. Tests: `test_bus_relay.py::test_H_deliver_*` (with the external review's 500 repro; 3 tests failed before the fix).
+- **Public exposure:** the relay may still be exposed ONLY behind a proxy that terminates TLS and rate-limits; the built-in limit protects deliverability, it does not replace the proxy (README).
+- LOW (nonce-cache persistence) → closed by v1.4; LOW (forward secrecy) and INFO (CI, mixed test style) → open, see the v1.4 development log.
 
-## v1.2.0 — 2026-09-14 (protokoll MINOR; DB-séma változatlan: 1.0.0)
+## v1.2.0 — 2026-09-14 (protocol MINOR; DB schema unchanged: 1.0.0)
 
-### Új
-- **`bus_ssh_exchange.py` / `bus_ssh_enroll.py` / `bus_ssh_client.py`** — szállítás gépek között SSH-n:
-  - a távoli gép KIFELÉ SSH-zik (NAT-on át, a távoli oldalon nincs portnyitás);
-  - a busz-gépen a kulcs egy `command="… bus_ssh_exchange.py <identity>",restrict,no-pty,…` sorhoz kötött —
-    az identitás a parancs-argumentumból jön, a payload `from`/`sender` mezője figyelmen kívül marad;
-  - méret-plafon (stdin, üzenet/kör), üzenetenkénti elutasítás, sds-envelope átmegy és a válaszok `sds` címkét kapnak;
-  - legalább-egyszer kézbesítés: a válasz peek, a kurzor a kliens következő körbeli `ack`-jára lép; a kliens a
-    távoli id alapján dedupol;
-  - az enroll CSAK sort állít elő / a megadott fájlba ír, az sshd-konfigurációhoz nem nyúl.
-- **`bus_relay.py`** — vak store-and-forward relay, ha nincs közvetlen SSH:
-  - E2E borítékolás (X25519 → HKDF-SHA256 → ChaCha20-Poly1305), a relay csak opak borítékot tárol;
-  - **aláírt lehúzás** (`/pickup`): Ed25519, célhoz kötött (`pickup`/`events`), ±120 s ts-ablak, nonce-replay-cache;
-  - **SSE** (`/events`): hitelesített feliratkozás, csak „N várakozó" jelzés, tartalom soha; a kliens pollozásra esik vissza;
-  - fail-closed: `cryptography` nélkül vagy üres registry-vel nem indul; lehúzott boríték `.picked/` alá (nincs törlés).
-- **`bus_attach.py`** — nagy tartalom csatolmányként: tartalom-címzett, write-once tár; a busz `attachment` kindja
-  csak a leírót viszi (`sha256`, `size`, `media_type`, `locator`); olvasáskor hash+méret ellenőrzés; darabolt
-  szállítás SSH-n és relay-en, a tárba csak a teljes hash-ellenőrzés után kerül.
-- **`sce_hook.py`** — csatlakozási pont a Silent Consensus Engine-hez (`AGENT_BUS_SCE_DECIDER=modul:függvény`);
-  motor-kód nincs; nincs döntő → nincs döntés; hibás döntő → ABORT.
+### New
+- **`bus_ssh_exchange.py` / `bus_ssh_enroll.py` / `bus_ssh_client.py`** — transport between machines over SSH:
+  - the remote machine SSHes OUTWARD (through NAT, no port opened on the remote side);
+  - on the bus machine the key is bound to a `command="… bus_ssh_exchange.py <identity>",restrict,no-pty,…` line —
+    the identity comes from the command argument, the payload's `from`/`sender` field is ignored;
+  - size ceiling (stdin, message/round), per-message rejection, sds-envelope passes and the replies get an `sds` label;
+  - at-least-once delivery: the reply is a peek, the cursor steps on the client's `ack` in the next round; the client
+    dedupes by remote id;
+  - enroll ONLY produces a line / writes to the given file, it does not touch the sshd configuration.
+- **`bus_relay.py`** — a blind store-and-forward relay, when there is no direct SSH:
+  - E2E enveloping (X25519 → HKDF-SHA256 → ChaCha20-Poly1305), the relay stores only an opaque envelope;
+  - **signed pickup** (`/pickup`): Ed25519, purpose-bound (`pickup`/`events`), ±120 s ts window, nonce replay cache;
+  - **SSE** (`/events`): authenticated subscription, only an "N pending" signal, never content; the client falls back to polling;
+  - fail-closed: does not start without `cryptography` or with an empty registry; a picked-up envelope goes under `.picked/` (no deletion).
+- **`bus_attach.py`** — large content as an attachment: a content-addressed, write-once store; the bus's `attachment` kind
+  carries only the descriptor (`sha256`, `size`, `media_type`, `locator`); hash+size check on read; chunked
+  transport over SSH and the relay, it enters the store only after the full hash check.
+- **`sce_hook.py`** — a hook point for the Silent Consensus Engine (`AGENT_BUS_SCE_DECIDER=module:function`);
+  no engine code; no decider → no decision; a faulty decider → ABORT.
 
-### Változott
-- `agent_bus.py`: `PROTOCOL_VERSION = "1.2.0"`; `send` elutasítja a nem-leíró body-t `attachment` kindnál.
-  A 64 KB-os body-plafon változatlan.
+### Changed
+- `agent_bus.py`: `PROTOCOL_VERSION = "1.2.0"`; `send` rejects a non-descriptor body for the `attachment` kind.
+  The 64 KB body ceiling is unchanged.
 
-### Szándékosan kimaradt
-- **ICE / WebRTC:** a kifelé irányuló SSH ugyanazt a NAT-problémát megoldja külső STUN/TURN szerverek és nagy
-  támadási felület nélkül.
+### Deliberately left out
+- **ICE / WebRTC:** outbound SSH solves the same NAT problem without external STUN/TURN servers and a large
+  attack surface.
 
-### Tesztek
-- 31 új (SSH 11, relay 9, csatolmány 7, SCE-hook 4); a teljes csomag 91 zöld.
+### Tests
+- 31 new (SSH 11, relay 9, attachment 7, SCE hook 4); the full suite 91 green.
 
-## [1.1.1] — javításai
+## [1.1.1] — fixes
 
-- **B1 (BLOCKER) — `bus_singleflight`:** az `acquire` CLI egyszeri folyamat, a saját pid-je nem tulajdonos. Most: (1) a check→stale→visszaigénylés lépéssor egy oldalfájlon tartott `flock` alatt atomi; (2) a CLI alapból a HÍVÓ (szülő) pid-jét veszi tulajdonosnak, ha nincs `--owner-pid`/`--target`; (3) nem-pid alakú instance friss zárja a TTL-ig él (korábban azonnal halottnak látszott); (4) identitás-visszanyerés csak ugyanannak a tulajdonosnak jár. Teszt: `test_bus_singleflight.py` (valódi OS-folyamatokkal, a külső review mindkét reprójával — a javítás előtt 4 teszt bukott).
-- **H1 — tmux-target + halott explicit owner-pid:** a zár már nem ragad be (`pid_src=owner` esetén a pid halála is a zár halála).
-- **H2 — watcher DoS:** a JSON-törzs agent-nevei ugyanazt a szigorú `[A-Za-z0-9._-]{1,64}` szabályt kapják; a watcher diszpécsere nem állhat le egy operátor-parancs kivételén.
-- **H3:** `bus_singleflight` dedikált tesztkészletet kapott.
-- **M1:** a teljes készlet CSAK `python3 -m pytest -q`-val fut le; `test_runner_guard.py` unittest alatt hangosan bukik (a korábbi „vagy `python3 -m unittest`" téves volt).
-- **M2 — kulcs nélküli operátor:** alapból elutasítva (`ignored:operator-no-key`); fejlesztői kivétel csak `AGENT_WAKE_ALLOW_KEYLESS_OPERATOR=1`-gyel.
+- **B1 (BLOCKER) — `bus_singleflight`:** the `acquire` CLI is a one-shot process, its own pid is not the owner. Now: (1) the check→stale→reclaim sequence is atomic under a `flock` held on a side file; (2) by default the CLI takes the CALLER's (parent) pid as the owner if there is no `--owner-pid`/`--target`; (3) a fresh lock of a non-pid-shaped instance lives until the TTL (previously it immediately looked dead); (4) identity recovery is granted only to the same owner. Tests: `test_bus_singleflight.py` (with real OS processes, with both repros of the external review — 4 tests failed before the fix).
+- **H1 — tmux target + dead explicit owner pid:** the lock no longer gets stuck (with `pid_src=owner` the pid's death is the lock's death too).
+- **H2 — watcher DoS:** agent names in the JSON body get the same strict `[A-Za-z0-9._-]{1,64}` rule; the watcher's dispatcher cannot stop on an exception from an operator command.
+- **H3:** `bus_singleflight` got a dedicated test suite.
+- **M1:** the full suite runs ONLY with `python3 -m pytest -q`; `test_runner_guard.py` fails loudly under unittest (the earlier "or `python3 -m unittest`" was wrong).
+- **M2 — operator without a key:** rejected by default (`ignored:operator-no-key`); a developer exception only with `AGENT_WAKE_ALLOW_KEYLESS_OPERATOR=1`.
 
-## v1.1.0 — 2026-09-14 (protokoll MINOR; DB-séma változatlan: 1.0.0)
+## v1.1.0 — 2026-09-14 (protocol MINOR; DB schema unchanged: 1.0.0)
 
-### Javítás — 29Z)
-- **B1-var:** `acquire --target <nem élő panel>` megtagadva (`target-not-live`, rc=4, nincs lock-írás) — korábban a
-  sosem-élő targettel írt zárat a másik hívó azonnal stale-nek látta → 9/15 körben két `acquired`. Regresszió:
-  `test_B1var_owner_pid_vs_nonexistent_target_never_double_acquired` (15 kör), `test_B1var_acquire_with_dead_target_is_refused_and_writes_nothing`.
-- **WAKE_DIR:** `agent_bus_watcher.wake_dir()` a hívás idején: `AGENT_WAKE_DIR` vagy `<AGENT_BRIDGE_DIR>/wake` (korábban import-időben
-  befagyott, telepítés-alapértelmezett `wake` könyvtár). A tesztek `Env` alapja a tmp alá irányítja mindhárom könyvtárat.
-- README: az `AGENT_WAKE_ALLOW_KEYLESS_OPERATOR` dev-kapcsoló dokumentálva.
+### Fix — 29Z)
+- **B1-var:** `acquire --target <non-live pane>` refused (`target-not-live`, rc=4, no lock write) — previously the other caller
+  immediately saw a lock written with a never-live target as stale → two `acquired` in 9/15 rounds. Regression:
+  `test_B1var_owner_pid_vs_nonexistent_target_never_double_acquired` (15 rounds), `test_B1var_acquire_with_dead_target_is_refused_and_writes_nothing`.
+- **WAKE_DIR:** `agent_bus_watcher.wake_dir()` at call time: `AGENT_WAKE_DIR` or `<AGENT_BRIDGE_DIR>/wake` (previously frozen at
+  import time, the install-default `wake` directory). The tests' `Env` base points all three directories under tmp.
+- README: the `AGENT_WAKE_ALLOW_KEYLESS_OPERATOR` dev switch documented.
 
-### Új
-- **`agent_wake.py`** — az ébresztési szabályok egy helyen:
-  - *szent gépelés*: élő, el nem küldött szöveget tartalmazó promptba soha nem ír, és nem töröl (nincs C-u);
-    a halvány (dim) felajánlás nem gépelés; kétség esetén „gépel";
-  - dolgozó agentet nem bök;
-  - *sleep-safe*: globális vagy agentenkénti marker; alvó agent panelébe nem megy bökés és headless wake sem indul;
-  - *operátori wake*: `operator-wake` / `operator-sleep-safe` kind, csak engedélyezett (és ha van kulcsa, aláírt)
-    operátortól; agent magát nem ébresztheti; a WAKE a markert `history/` alá mozgatja (nincs törlés).
-- **`sds_envelope.py`** + `agent_bus` bekötés (a külső review három lépése):
-  - `send --kind sds-envelope`: csak SPEC §5.5 keretezett `{record, envelope}` pár;
+### New
+- **`agent_wake.py`** — the wake-up rules in one place:
+  - *sacred typing*: never writes into, and never clears, a prompt containing live unsent text (no C-u);
+    a dim (faded) suggestion is not typing; when in doubt, "typing";
+  - does not poke a working agent;
+  - *sleep-safe*: a global or per-agent marker; no poke goes into a sleeping agent's pane and no headless wake starts;
+  - *operator wake*: `operator-wake` / `operator-sleep-safe` kind, only from an authorized (and, if it has a key, signed)
+    operator; an agent cannot wake itself; WAKE moves the marker under `history/` (no deletion).
+- **`sds_envelope.py`** + `agent_bus` wiring (the external review's three steps):
+  - `send --kind sds-envelope`: only a SPEC §5.5 framed `{record, envelope}` pair;
   - `recv --verify-sds [--strict-sds] [--sds-admission PATH]`: `valid | invalid(<ok>) | unsigned | unverifiable(<ok>)`;
-    cserélhető validátor (`AGENT_BUS_SDS_VALIDATOR` / `CAPSULE2_SDS_VALIDATOR`);
-  - kormányzás-híd: helyi admission-fájl + A2 kulcs-registry → `not-admitted`, `key-mismatch`, `forged-sender`.
-- **`bus_singleflight.py`** — egy agent-identitásból egyszerre csak egy instancia drainel (session-lock + atomi claim).
-- Tesztek: `test_agent_wake.py`, `test_sds_envelope.py`, `test_agent_bus_security.py`, `test_bus_poke_pin.py`.
+    swappable validator (`AGENT_BUS_SDS_VALIDATOR` / `CAPSULE2_SDS_VALIDATOR`);
+  - governance bridge: local admission file + A2 key registry → `not-admitted`, `key-mismatch`, `forged-sender`.
+- **`bus_singleflight.py`** — only one instance per agent identity drains at a time (session lock + atomic claim).
+- Tests: `test_agent_wake.py`, `test_sds_envelope.py`, `test_agent_bus_security.py`, `test_bus_poke_pin.py`.
 
-### Változott
-- `bus_poke.py`: az inject az `agent_wake` szabályain megy át; ha a modul hiányzik, **nem injektál** (fail-closed).
-  Új `Poker.on_new` eredmények: `sleep-safe`, `typed`, `busy`, `stuck`.
-- `agent_bus_watcher.py`: alvó agentet nem ébreszt; a címzettnek érkező operátori WAKE/SLEEP parancsokat alkalmazza.
-- `agent_bus.py`: `PROTOCOL_VERSION = "1.1.0"`; `SCHEMA_VERSION` szándékosan `1.0.0` marad (a `verify` a pin-eltérést
-  DRIFT-nek jelzi, a séma pedig nem változott).
+### Changed
+- `bus_poke.py`: injection goes through `agent_wake`'s rules; if the module is missing, it **does not inject** (fail-closed).
+  New `Poker.on_new` results: `sleep-safe`, `typed`, `busy`, `stuck`.
+- `agent_bus_watcher.py`: does not wake a sleeping agent; applies operator WAKE/SLEEP commands addressed to the recipient.
+- `agent_bus.py`: `PROTOCOL_VERSION = "1.1.0"`; `SCHEMA_VERSION` deliberately stays `1.0.0` (`verify` flags a pin mismatch as
+  DRIFT, and the schema did not change).
 
 ## v1.0.0 — 2026-06-21
-Befagyasztott wire-kontraktus (lásd `docs/AGENT_BUS_SCHEMA.md`).
+Frozen wire contract (see `docs/AGENT_BUS_SCHEMA.md`).
 

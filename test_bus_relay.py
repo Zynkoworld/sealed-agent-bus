@@ -1,5 +1,5 @@
-"""bus_relay: vak store-and-forward (E2E), aláírt lehúzás (hamis/aláíratlan/replay → 401), SSE-értesítés tartalom
-nélkül, csatolmány darabokban, fail-closed indulás. Csak 127.0.0.1. stdlib unittest (+cryptography)."""
+"""bus_relay: a blind store-and-forward (E2E), signed pickup (forged/unsigned/replay → 401), SSE notification without
+content, attachments in chunks, fail-closed start. Only 127.0.0.1. stdlib unittest (+cryptography)."""
 import json
 import os
 import sys
@@ -51,10 +51,10 @@ class RelayTest(unittest.TestCase):
             for f in files:
                 spooled += open(os.path.join(root, f)).read()
         self.assertTrue(spooled)
-        self.assertNotIn(secret, spooled)                        # a relay csak titkosított borítékot lát
+        self.assertNotIn(secret, spooled)                        # the relay sees only an encrypted envelope
         got = self.bob.pickup()
         self.assertEqual([g["body"] for g in got], [secret])
-        self.assertEqual(self.bob.pickup(), [])                 # lehúzva (a .picked alá mozgatva, nem törölve)
+        self.assertEqual(self.bob.pickup(), [])                 # picked up (moved under .picked, not deleted)
         picked = os.listdir(os.path.join(self.relay.spool, "bob", ".picked"))
         self.assertEqual(len(picked), 1)
 
@@ -63,8 +63,8 @@ class RelayTest(unittest.TestCase):
                 "ct": "00" * 16, "alg": "x25519-hkdf-chacha20poly1305"}
 
     def test_H_deliver_flood_is_capped_per_recipient(self):
-        """500 formailag érvényes boríték egy címzettnek, hitelesítés nélkül → korábban
-        mind az 500 bekerült; most a címzettenkénti várakozó-plafon felett 429, a spoolban legfeljebb a plafon."""
+        """500 formally valid envelopes to one recipient, without authentication → previously
+        all 500 got in; now above the per-recipient pending ceiling 429, at most the ceiling in the spool."""
         codes = [self._post("/deliver", self._fake_env("bob", i))[0] for i in range(500)]
         spool_files = [n for n in os.listdir(os.path.join(self.relay.spool, "bob")) if n.endswith(".json")]
         self.assertLessEqual(len(spool_files), self.relay.max_pending_per_recipient)
@@ -89,8 +89,8 @@ class RelayTest(unittest.TestCase):
 
     def test_unsigned_forged_and_replayed_pickup_rejected(self):
         self.alice.deliver("bob", "m1")
-        self.assertEqual(self._post("/pickup", {"agent": "bob"})[0], 401)                       # aláíratlan
-        forged = br.sign_request("pickup", "bob", self.a_sign)                                   # alice kulcsával bobként
+        self.assertEqual(self._post("/pickup", {"agent": "bob"})[0], 401)                       # unsigned
+        forged = br.sign_request("pickup", "bob", self.a_sign)                                   # with alice's key, as bob
         self.assertEqual(self._post("/pickup", forged)[0], 401)
         stale = br.sign_request("pickup", "bob", self.b_sign, ts=int(time.time()) - 10 * br.WINDOW)
         self.assertEqual(self._post("/pickup", stale)[0], 401)
@@ -103,26 +103,26 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(len(os.listdir(os.path.join(self.relay.spool, "bob", ".picked"))), 1)
 
     def test_replay_rejected_after_relay_restart(self):
-        """v1.4: a nonce-tár tartós — újraindított relay ugyanazt az aláírt lehúzást sem fogadja el."""
+        """v1.4: the nonce store is durable — a restarted relay does not accept the same signed pickup either."""
         self.alice.deliver("bob", "m1")
         good = br.sign_request("pickup", "bob", self.b_sign)
         self.assertEqual(self._post("/pickup", good)[0], 200)
         spool, reg = self.relay.spool, dict(self.relay.auth.registry)
         self.relay.stop()
-        self.relay = br.Relay(spool, reg, sse_interval=0.05).start()           # "újraindítás": új folyamat-állapot, ugyanaz a spool
+        self.relay = br.Relay(spool, reg, sse_interval=0.05).start()           # "restart": new process state, the same spool
         self.assertEqual(self._post("/pickup", good)[0], 401)
         fresh = br.sign_request("pickup", "bob", self.b_sign)
-        self.assertEqual(self._post("/pickup", fresh)[0], 200)                  # friss kérés továbbra is megy
+        self.assertEqual(self._post("/pickup", fresh)[0], 200)                  # a fresh request still works
 
     def test_H2_deleted_nonce_store_does_not_reopen_replay(self):
-        """a nonce-fájl törlése + relay-újraindítás ne nyissa meg ugyanazt az aláírt lehúzást."""
+        """deleting the nonce file + a relay restart must not reopen the same signed pickup."""
         self.alice.deliver("bob", "m1")
         good = br.sign_request("pickup", "bob", self.b_sign)
         self.assertEqual(self._post("/pickup", good)[0], 200)
         spool, reg = self.relay.spool, dict(self.relay.auth.registry)
         self.relay.stop()
         os.unlink(os.path.join(spool, ".pickup_nonces.jsonl"))
-        time.sleep(1.1)                                                        # az újraindítás a lehúzás UTÁNI másodpercben
+        time.sleep(1.1)                                                        # the restart in the second AFTER the pickup
         self.relay = br.Relay(spool, reg, sse_interval=0.05).start()
         self.assertEqual(self._post("/pickup", good)[0], 401)
         fresh = br.sign_request("pickup", "bob", self.b_sign)
@@ -144,7 +144,7 @@ class RelayTest(unittest.TestCase):
         env = br.seal("hello", "alice", "bob", self.a_x, self.bob.peers["bob"])
         env["ct"] = env["ct"][:-4] + ("AAAA" if not env["ct"].endswith("AAAA") else "BBBB")
         self.assertEqual(self.relay.deliver(env)[0], 200)
-        self.assertEqual(self.bob.pickup(), [])                 # AEAD-hiba → kimarad (fail-closed)
+        self.assertEqual(self.bob.pickup(), [])                 # AEAD error → skipped (fail-closed)
 
     def test_sse_notifies_without_content(self):
         result = {}

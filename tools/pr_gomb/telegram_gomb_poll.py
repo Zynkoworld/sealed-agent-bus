@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""telegram_gomb_poll — a Telegram INLINE GOMB válaszainak (callback_query) lekérése egy append-only könyvbe.
+"""telegram_gomb_poll — fetching the Telegram INLINE BUTTON replies (callback_query) into an append-only ledger.
 
-Ez a fájl NEM dönt semmiről: minden gombnyomást egy sorként a `valaszok.jsonl`-be ír (update_id, from_id, data,
-callback_query_id, ts), a gombot nyugtázza (answerCallbackQuery, hogy a telefon ne pörögjön), és a getUpdates offsetjét
-lépteti. A döntést és a merge-et a `pr_gomb.py feldolgoz` végzi — külön folyamat, fájlon át, soha csövön.
+This file decides NOTHING: it writes every button press as a line into `valaszok.jsonl` (update_id, from_id, data,
+callback_query_id, ts), acknowledges the button (answerCallbackQuery, so the phone does not keep spinning), and advances the getUpdates
+offset. The decision and the merge are done by `pr_gomb.py feldolgoz` — a separate process, through a file, never a pipe.
 
-Ha már fut egy saját Telegram-poller (ugyanazzal a bot-tokennel), akkor NE ezt futtasd mellette (a getUpdates offset
-közös): abba kell beleírni ugyanezt az 5 sort — lásd README „Meglévő poller".
+If you already run your own Telegram poller (with the same bot token), do NOT run this one beside it (the getUpdates offset
+is shared): the same 5 lines must be added to that one — see the README section "Existing poller".
 
-Beállítás: ugyanaz a config.json, mint a pr_gomb.py-é (telegram_bot_token_file, disabled_marker). Cron: percenként, flock alatt.
+Setup: the same config.json as pr_gomb.py's (telegram_bot_token_file, disabled_marker). Cron: every minute, under flock.
 """
 import json
 import os
@@ -39,12 +39,12 @@ def main():
         cfg = json.load(f)
     marker = cfg.get("disabled_marker")
     if marker and os.path.exists(marker):
-        return 0                                                # kikapcsolva fájllal: nem kérdez, nem ír
+        return 0                                                # disabled by a file: does not ask, does not write
     token = _read(cfg["telegram_bot_token_file"])
     off = int(_read(OFFSET_F) or "0") if os.path.exists(OFFSET_F) else 0
     res = _tg(token, "getUpdates", {"offset": off, "timeout": 20, "allowed_updates": ["callback_query"]})
     if not res.get("ok"):
-        print("telegram_gomb_poll: getUpdates nem ok: %s" % res)
+        print("telegram_gomb_poll: getUpdates not ok: %s" % res)
         return 1
     last = off
     for u in res.get("result") or []:
@@ -58,9 +58,9 @@ def main():
                                 "data": cq.get("data"), "callback_query_id": cq.get("id"),
                                 "ts": int(time.time())}, ensure_ascii=False) + "\n")
         try:
-            _tg(token, "answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": "Megkaptam, feldolgozom."})
-        except Exception as e:                                  # a nyugta kényelmi réteg; a könyv már megvan
-            print("telegram_gomb_poll: answerCallbackQuery hiba: %s" % e)
+            _tg(token, "answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": "Received, processing."})
+        except Exception as e:                                  # the acknowledgement is a convenience layer; the ledger already has it
+            print("telegram_gomb_poll: answerCallbackQuery error: %s" % e)
     if last != off:
         with open(OFFSET_F, "w", encoding="utf-8") as f:
             f.write(str(last))

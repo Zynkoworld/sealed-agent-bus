@@ -73,22 +73,22 @@ SHAPE = (
     # be published in order to work. Measured on 1.5.3: 30 ticket numbers, 141 severity labels and 29 dated
     # review lines were standing in the archive.
     #
-    # What is NOT in it, and why: "round" and "kör" were, and they fired on the protocol's own vocabulary —
-    # round_seq, round_close, "a kör-bejegyzés". A leak class that matches the product's domain language
+    # What is NOT in it, and why: "round" and its Hungarian equivalent were, and they fired on the protocol's own vocabulary —
+    # round_seq, round_close, the Hungarian "round entry". A leak class that matches the product's domain language
     # produces hits nobody can act on, and a gate whose hits are routinely waved through stops being a gate.
-    # "támadókör" stays: that one is only ever our own review.
+    # The Hungarian word for "attack round" stays: that one is only ever our own review.
     ("internal review attribution",
-     # A jegyszám EGYJEGYŰ is lehet. Az első változat 2-5 számjegyet kért, és pontosan emiatt maradt bent
-     # egy "#6 15:37Z BLOCKER:" attribúció a szállított product/claims.json-ban — a kapu tisztát mondott.
+     # A ticket number may also be a SINGLE digit. The first version asked for 2-5 digits, and exactly because of that a
+     # "#6 15:37Z BLOCKER:" attribution stayed in the shipped product/claims.json — the gate called it clean.
      r"(?i)(?<![\w&])#\d{1,5}\b"
-     # Súlyossági címke számmal ÉS anélkül: a "BLOCKER:" önmagában is a mi triázsunk szava.
+     # A severity label with AND without a number: "BLOCKER:" on its own is a word of our triage too.
      r"|\b(?:HIGH|MEDIUM|LOW|BLOCKER|CRITICAL|KRITIKUS|NIT)(?:-\d)?\s*(?:\([^)\n]{0,12}\))?\s*:"
      r"|\b(?:HIGH|MEDIUM|LOW|BLOCKER|CRITICAL|KRITIKUS)-\d\b"
      r"|\bt[áa]mad[óo]k[öo]r\b"
-     # Belső időbélyeg (a kör órája), csonka alakban is — a scrub ilyen törmeléket hagy maga után.
-     # ...de NEM egy ISO-8601 időbélyeg belsejében: a "2026-09-21T19:06:42Z" mérési idő a publikált
-     # bizonyítékban legitim, és az első változat a "06:42Z" darabját leletnek jelentette. Egy kapu,
-     # aminek a találatait rutinból legyintik le, megszűnik kapu lenni.
+     # An internal timestamp (the round's clock), also in truncated form — the scrub leaves such debris behind.
+     # ...but NOT inside an ISO-8601 timestamp: the "2026-09-21T19:06:42Z" measurement time is legitimate in the published
+     # evidence, and the first version reported its "06:42Z" fragment as a finding. A gate
+     # whose hits are routinely waved through stops being a gate.
      r"|(?<![\d:])\d{1,2}:\d\d[Zz]\b|(?<=#\s)\d{1,2}[Zz]\b"
      r"|\b20\d\d-\d\d-\d\d[^\n]{0,20}\b(?:blocker|review)\b"),
 )
@@ -103,15 +103,15 @@ MODEL_CONTEXT = r"model|modell|arm|kar|codename|k[óo]dn[ée]v|llm|impl|pin"
 ROSTER_SHAPE = {
     # A path fragment carries its own boundaries; matching it as written is the whole rule.
     "internal path": r"%s",
-    # A szóhatár (\b) az ALÁHÚZÁST szó-karakternek veszi, ezért egy azonosítóba tapadt név — `<nev>_entitlement`,
-    # `<nev>_bus_adapter` — ÁTMEGY rajta. Mérve ezen a fán, MIUTÁN a sétát tisztának mondtam: két ilyen állt a
-    # szállított kódban. Ugyanaz a vakfolt, mint a gépneveknél; a határ ezért betűre/számjegyre szól, nem \b-re.
+    # The word boundary (\b) treats UNDERSCORE as a word character, so a name stuck into an identifier — `<name>_entitlement`,
+    # `<name>_bus_adapter` — PASSES it. Measured on this tree, AFTER I had called the walk clean: two such stood in the
+    # shipped code. The same blind spot as for hostnames; so the boundary is on letters/digits, not on \b.
     "internal agent name": r"(?i)(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])",
     # A machine name gets concatenated into identifiers — a host "foo2" turns up as "foo2test" — and a
     # trailing \b steps over exactly those. Measured on the published 1.5.3: of the 7 occurrences of one
     # machine name in the shipped set, 2 were of that form and a \b-anchored pattern found neither.
     "internal hostname": r"(?i)\b(?:%s)\w*",
-    # Hungarian case endings: a bare \b misses the suffixed forms ("Ödönyinek", "Kovácsnak"), which is how a
+    # Hungarian case endings: a bare \b misses the suffixed forms (a name followed by -nak, -nek, -val, ...), which is how a
     # private note once slipped
     # past the first version of this check.
     "internal person name": r"(?i)(?<![A-Za-z0-9])(?:%s)(nak|nek|val|vel|t[óo]l|t[őo]l|r[óo]l|r[őo]l|hoz|hez|ban|ben|"
@@ -346,15 +346,15 @@ def scan_shipped(pats, docs=None):
     quietly grow to cover a directory that later fills up with generated text."""
     hits, scanned = [], 0
     for f in shipped_files():
-        # A minta-tartó mentesség CSAK az ALAK-osztályokra szól, mert azokra van indoka: ezek a fájlok
-        # e-mail- és IP-ALAKÚ mintákat, attribúció-példákat és beültetett leleteket hordoznak, azoktól
-        # tisztává tenni őket értelmetlen. A NÉVSOR-osztályokra viszont NINCS indok: a névsor 1.5.4 óta
-        # nem a kódban él, tehát egy minta-tartónak semmi oka valódi nevet tartalmaznia.
+        # The pattern-holder exemption applies ONLY to the SHAPE classes, because there is a reason for them: these files
+        # carry e-mail- and IP-SHAPED patterns, attribution examples and planted findings, and making them
+        # clean of those is meaningless. For the ROSTER classes, however, there is NO reason: since 1.5.4 the roster
+        # does not live in the code, so a pattern holder has no reason to contain a real name.
         #
-        # Ez nem elméleti szigorítás. Egy ellenpróba-teszt, amit ÉN írtam ebbe a fájlba, a valódi
-        # licencadó-nevet használta példaként — és mivel a mentesség akkor MINDEN osztályra szólt, a séta
-        # nullát jelentett, miközben a név BENNE VOLT a kicsomagolt archívumban. A fa-szintű nulla nem
-        # ugyanaz, mint "az archívumban nincs név", amíg egy kivétel a kettő közé áll.
+        # This is not theoretical tightening. A counter-check test that I wrote into this file used the real
+        # licensor name as an example — and since the exemption then applied to EVERY class, the walk
+        # reported zero while the name WAS IN the unpacked archive. A tree-level zero is not the
+        # same as "there is no name in the archive" while an exception stands between the two.
         holder_classes = {n for n, _ in SHAPE} if f in PATTERN_HOLDERS else set()
         if docs is not None and f.endswith(".md") != docs:
             continue
@@ -415,8 +415,8 @@ def check_shipped_text(_):
 
 
 def check_provenance(_):
-    """A BSL alatt licencelni CSAK saját (vagy egy-vállalkozáson belüli) szerzői joggal lehet: minden szállított fájl
-    eredete rögzítve, és ami nincs a listán vagy harmadik féltől van, az MEGÁLLÍTJA a kiadást."""
+    """Under BSL one can license ONLY with our own (or same-business) copyright: the origin of every shipped file
+    is recorded, and whatever is not on the list or is third-party STOPS the release."""
     pp = os.path.join(HERE, "provenance.json")
     if not os.path.isfile(pp):
         return False, "product/provenance.json is missing — the BSL licence needs a recorded origin per file"
@@ -468,7 +468,7 @@ def main(argv=None) -> int:
     for label, fn in items:
         try:
             ok, detail = fn(a.version)
-        except Exception as e:                                    # noqa: BLE001 — egy szakadt lépés is BUKÁS, nem kihagyás
+        except Exception as e:                                    # noqa: BLE001 — a broken step is also a FAILURE, not a skip
             ok, detail = False, "%s: %s" % (type(e).__name__, str(e)[:120])
         mark = "SKIP" if ok is None else ("OK" if ok else "FAIL")
         print("  %-5s %-32s %s" % (mark, label, detail))

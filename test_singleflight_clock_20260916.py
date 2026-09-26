@@ -1,19 +1,19 @@
-"""A single-flight zár támadása — saját.
+"""An attack on the single-flight lock — our own.
 
-A modul fő ígérete: EGY agent-identitásra EGY példány dolgozik. A nem-Claude kar négy utat talált; kettőt
-itt zárunk, kettőt KIMONDUNK (mert a vendorolt hívók szerződését változtatná, tehát nem egyoldalú lépés):
+The module's main promise: ONE instance works per agent identity. The non-Claude arm found four ways; two we
+close here, two we STATE (because it would change the vendored callers' contract, so it is not a unilateral step):
 
-  ZÁRVA 1 — injektálható óra: a hívó által adott `now_ns` eddig korlátlan volt, tehát egy
-            `acquire(..., now_ns=2**62)` hívással bárki STALE-nek láthatott egy ÉLŐ, TTL-alapú zárat, és
-            elvehette. Mostantól az ÉLETRŐL döntő óra csak a valóságtól 24 órán belüli hívói értéket fogadja
-            el (a szimuláció így továbbra is működik).
-  ZÁRVA 2 — a `heartbeat` és a `release` nem fogta a mutexet, csak az `acquire` -> egy takeover és egy
-            heartbeat közé beékelődve két fél is „tulajdonosnak" hihette magát. Most ugyanaz a sorbarendezés.
+  CLOSED 1 — an injectable clock: the caller-supplied `now_ns` used to be unbounded, so with an
+            `acquire(..., now_ns=2**62)` call anyone could see a LIVE, TTL-based lock as STALE, and
+            take it. From now on the clock that decides LIFE accepts only a caller value within 24 hours of reality
+            (so simulation still works).
+  CLOSED 2 — `heartbeat` and `release` did not take the mutex, only `acquire` did -> wedged between a takeover and a
+            heartbeat, two parties could both believe they were "the owner". Now the same serialization.
 
-  KIMONDVA 3 — a `release` csak az `instance` STRING egyezését kéri: aki a lock-fájlt olvassa, egy ÉLŐ
-            tulajdonos zárát is elengedheti. Teljes zárás: acquire-kor adott titkos token — MAJOR-kapu.
-  KIMONDVA 4 — `target` liveness `owner_pid` nélkül: egy élő panelhez kötött zár akkor is „él", ha a worker
-            rég halott (rendelkezésre-állási támadás, NEM duplikátum).
+  STATED 3 — `release` only requires the `instance` STRING to match: whoever reads the lock file can release a LIVE
+            owner's lock too. Full closure: a secret token issued at acquire — a MAJOR gate.
+  STATED 4 — `target` liveness without `owner_pid`: a lock bound to a live pane is "alive" even if the worker
+            died long ago (an availability attack, NOT a duplicate).
 
 stdlib unittest.
 """
@@ -39,28 +39,28 @@ class LockUnderAttack(unittest.TestCase):
         return sf.SessionLock("peer", bridge=self.bridge, is_alive=lambda pid: alive,
                               target_alive=lambda t: True)
 
-    # ── kontroll: a második példány duplikátum ──────────────────────────────
+    # ── control: the second instance is a duplicate ──────────────────────────────
     def test_control_second_instance_is_duplicate(self):
         self.assertEqual(self.lock().acquire("A", owner_pid=os.getpid())[0], "acquired")
         self.assertEqual(self.lock().acquire("B", owner_pid=os.getpid())[0], "duplicate")
 
-    # ── 1: a jövőből érkező hívói óra nem tehet stale-lé egy élő zárat ──────
+    # ── 1: a caller clock from the future cannot make a live lock stale ──────
     def test_far_future_clock_cannot_steal_a_live_ttl_lock(self):
-        st, _ = self.lock().acquire("A")                      # TTL-alapú zár (nincs target, nincs owner_pid)
+        st, _ = self.lock().acquire("A")                      # a TTL-based lock (no target, no owner_pid)
         self.assertEqual(st, "acquired")
         st2, holder = self.lock().acquire("B", now_ns=2 ** 62)
         self.assertEqual(st2, "duplicate",
-                         "a jövőbe állított hívói órával elvehető volt egy élő zár (holder=%r)" % (holder,))
+                         "a live lock could be taken with a caller clock set into the future (holder=%r)" % (holder,))
 
     def test_control_realistic_clock_simulation_still_works(self):
         lk = self.lock()
         st, _ = lk.acquire("A")
         self.assertEqual(st, "acquired")
-        later = sf.time.time_ns() + lk.ttl_ns + 10 ** 9        # a TTL tényleg letelt (valósághű szimuláció)
+        later = sf.time.time_ns() + lk.ttl_ns + 10 ** 9        # the TTL really expired (a realistic simulation)
         self.assertEqual(self.lock().acquire("B", now_ns=later)[0], "acquired",
-                         "a valósághű idő-szimulációnak továbbra is működnie kell")
+                         "realistic time simulation must still work")
 
-    # ── 2: a heartbeat és a release is a mutexen belül van ──────────────────
+    # ── 2: heartbeat and release are also inside the mutex ──────────────────
     def test_heartbeat_and_release_take_the_mutex(self):
         lk = self.lock()
         lk.acquire("A", owner_pid=os.getpid())
@@ -74,23 +74,23 @@ class LockUnderAttack(unittest.TestCase):
         lk._with_mutex = spy
         self.assertTrue(lk.heartbeat("A"))
         self.assertTrue(lk.release("A"))
-        self.assertEqual(len(seen), 2, "a heartbeat és a release nem ment át a mutexen")
+        self.assertEqual(len(seen), 2, "heartbeat and release did not go through the mutex")
 
     def test_release_still_refuses_a_foreign_instance(self):
         lk = self.lock()
         lk.acquire("A", owner_pid=os.getpid())
-        self.assertFalse(lk.release("B"), "idegen instance-névvel nem engedhető el a zár")
-        self.assertTrue(lk.holder(), "a zár megmaradt")
+        self.assertFalse(lk.release("B"), "the lock cannot be released with a foreign instance name")
+        self.assertTrue(lk.holder(), "the lock stayed")
 
-    # ── 3: KIMONDOTT korlát — a release csak nevet kér (mérés, nem vád) ─────
+    # ── 3: a STATED limit — release asks only for a name (a measurement, not an accusation) ─────
     def test_release_only_checks_the_instance_string(self):
         lk = self.lock()
         lk.acquire("A", owner_pid=os.getpid())
-        name = lk.holder()["instance"]                         # a lock-fájl olvasható
+        name = lk.holder()["instance"]                         # the lock file is readable
         other = sf.SessionLock("peer", bridge=self.bridge, is_alive=lambda pid: True,
                                target_alive=lambda t: True)
         self.assertTrue(other.release(name),
-                        "MÉRÉS: a név ismerete ma elég az elengedéshez — ez a kimondott korlát")
+                        "MEASUREMENT: knowing the name is enough to release today — this is the stated limit")
         self.assertIsNone(lk.holder())
 
 

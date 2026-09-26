@@ -20,10 +20,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.dirname(HERE)
 OUT = os.path.join(HERE, "provenance.json")
-PARTNER_PREFIXES = ("test_peer_",)              # a partner-kar (ugyanaz a vállalkozás) által írt, szó szerint szállított tesztek
-# A közös review-vonal fájljai: némelyik a partner szondája szó szerint, némelyik a mi válaszunk ugyanarra a
-# leletre. A kettő fájlnévből NEM megállapítható, és egy licenc-állítást nem tippelünk meg: ez a címke azt
-# mondja, ami igaz — közös vonal, egy vállalkozás, a relicencelési jog ugyanaz.
+PARTNER_PREFIXES = ("test_peer_",)              # tests written by the partner arm (the same business), shipped verbatim
+# The joint review line's files: some are the partner's probe verbatim, some are our answer to the same
+# finding. The two cannot be told apart from the file name, and we do not guess a licence claim: this label says
+# what is true — a joint line, one business, the same relicensing right.
 JOINT_PREFIXES = ("test_joint_",)
 
 RULE = ("Source-available (BSL) licensing is only possible because the copyright of every shipped file is ours to "

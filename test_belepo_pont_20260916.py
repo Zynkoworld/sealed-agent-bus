@@ -1,17 +1,17 @@
-"""A BELÉPŐ PONT: a másik fél exportja FÁJLKÉNT.
+"""THE ENTRY POINT: the other party's export AS A FILE.
 
-A capsule2-oldalon a korpusz-fájlon találtam meg ezt az osztályt (nyers `JSONDecodeError` a `verify_vectors`
-belépő pontján), és utána megnéztem, áll-e ugyanez a buszon. Áll, három alakban — és a harmadik a legrosszabb:
+On the capsule2 side I found this class on the corpus file (a raw `JSONDecodeError` at the `verify_vectors`
+entry point), and then checked whether the same holds on the bus. It does, in three shapes — and the third is the worst:
 
-    `5` egy sorban       -> AttributeError: 'int' object has no attribute 'get'   (NYERS TRACEBACK)
-    `[1,2,3]` egy sorban -> AttributeError: 'list' object has no attribute 'get'  (NYERS TRACEBACK)
-    ÜRES fájl            -> rc=0, ZÖLD                                            (NÉMA ZÖLD)
+    `5` on one line       -> AttributeError: 'int' object has no attribute 'get'   (RAW TRACEBACK)
+    `[1,2,3]` on one line -> AttributeError: 'list' object has no attribute 'get'  (RAW TRACEBACK)
+    EMPTY file            -> rc=0, GREEN                                            (SILENT GREEN)
 
-A `read_lines` `type: garbage` sora jó ötlet volt — de csak a JSON-PARSE hibát fedte. Ami JSON-ként érvényes,
-de nem OBJEKTUM, az egyenesen a `.get()`-be futott. Az üres fájl pedig nem „hibátlan napló", hanem NULLA
-BIZONYÍTÉK: nincs mit ellenőrizni, tehát nincs mit igazolni. Ugyanaz az osztály, mint a hiányzó horgonynál
-(`audit_anchor_absent`) és a hiányzó második nyilvántartásnál (`audit_register_absent`) — csak a legkorábbi
-ponton, ahol a partner bájtjai egyáltalán kódot érnek.
+The `type: garbage` line of `read_lines` was a good idea — but it covered only the JSON-PARSE error. What is valid as JSON
+but not an OBJECT ran straight into `.get()`. And the empty file is not a "clean log", but ZERO
+EVIDENCE: there is nothing to check, so nothing to attest. The same class as the missing anchor
+(`audit_anchor_absent`) and the missing second record (`audit_register_absent`) — just at the earliest
+point, where the partner's bytes reach code at all.
 
 stdlib unittest.
 """
@@ -37,10 +37,10 @@ class ReadLinesNeverHandsBackANonRecord(unittest.TestCase):
             os.unlink(p)
 
     def test_every_returned_record_is_a_dict(self):
-        """A ZÁRÓ SZABÁLY: bármit kapunk, a hívó SZÓTÁRAKAT lát — `.get()` sosem száll el."""
-        recs = self._read('5\n[1,2,3]\n"szoveg"\ntrue\nnull\nez nem json\n{"type": "entry"}\n')
+        """THE CLOSING RULE: whatever we get, the caller sees DICTS — `.get()` never blows up."""
+        recs = self._read('5\n[1,2,3]\n"text"\ntrue\nnull\nthis is not json\n{"type": "entry"}\n')
         self.assertTrue(all(isinstance(r, dict) for r in recs),
-                        "nem-szótár jutott ki a beolvasóból: %r" % recs)
+                        "a non-dict got out of the reader: %r" % recs)
 
     def test_a_scalar_line_is_named_garbage_with_its_type(self):
         recs = self._read("5\n")
@@ -54,13 +54,13 @@ class ReadLinesNeverHandsBackANonRecord(unittest.TestCase):
         self.assertEqual(recs[0]["parsed_as"], "list")
 
     def test_a_non_json_line_keeps_its_old_naming(self):
-        recs = self._read("ez nem json\n")
+        recs = self._read("this is not json\n")
         self.assertEqual(recs[0]["type"], "garbage")
-        self.assertNotIn("parsed_as", recs[0], "a PARSE-hiba és a rossz TÍPUS két külön eset")
+        self.assertNotIn("parsed_as", recs[0], "a PARSE error and a wrong TYPE are two separate cases")
 
     def test_the_line_number_survives_blank_lines(self):
         recs = self._read("\n\n5\n")
-        self.assertEqual(recs[0]["line"], 3, "a sorszám a FÁJL sorszáma legyen, ne a rekordoké")
+        self.assertEqual(recs[0]["line"], 3, "the line number must be the FILE's line number, not the records'")
 
     def test_a_bom_does_not_poison_the_first_record(self):
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8-sig") as f:
@@ -70,7 +70,7 @@ class ReadLinesNeverHandsBackANonRecord(unittest.TestCase):
             recs = bn.read_lines(p)
         finally:
             os.unlink(p)
-        self.assertEqual(recs[0].get("type"), "entry", "a BOM miatt az első sor szemétnek látszott: %r" % recs)
+        self.assertEqual(recs[0].get("type"), "entry", "because of the BOM the first line looked like garbage: %r" % recs)
 
 
 class AnEmptyLogIsNotAPass(unittest.TestCase):
@@ -86,21 +86,21 @@ class AnEmptyLogIsNotAPass(unittest.TestCase):
 
     def test_an_empty_file_is_rejected_not_passed(self):
         r = self._cli("")
-        self.assertEqual(r.returncode, 1, "az ÜRES napló zöld bizonyítványt kapott: rc=%s" % r.returncode)
-        self.assertIn("NULLA", r.stderr, r.stderr[-300:])
+        self.assertEqual(r.returncode, 1, "the EMPTY log got a green certificate: rc=%s" % r.returncode)
+        self.assertIn("ZERO", r.stderr, r.stderr[-300:])
 
     def test_a_whitespace_only_file_is_the_same_case(self):
         self.assertEqual(self._cli("\n\n   \n").returncode, 1)
 
     def test_no_input_class_produces_a_traceback(self):
-        """A traceback nem diagnózis — a MÁSIK fél exportja megbízhatatlan bemenet."""
-        for name, text in (("nem-JSON", "ez nem json\n"),
-                           ("félbevágott", '{"type": "entry", "seq": 1, "prev_hash": "aaa'),
-                           ("skalár", "5\n"), ("tömb", "[1,2,3]\n"), ("üres", ""),
-                           ("csak whitespace", "\n\n \n")):
+        """A traceback is not a diagnosis — the OTHER party's export is untrusted input."""
+        for name, text in (("non-JSON", "this is not json\n"),
+                           ("truncated", '{"type": "entry", "seq": 1, "prev_hash": "aaa'),
+                           ("scalar", "5\n"), ("array", "[1,2,3]\n"), ("empty", ""),
+                           ("whitespace only", "\n\n \n")):
             r = self._cli(text)
-            self.assertNotIn("Traceback", r.stderr, "%s -> nyers traceback: %s" % (name, r.stderr[-300:]))
-            self.assertNotEqual(r.returncode, 0, "%s -> a jelentés ZÖLD maradt" % name)
+            self.assertNotIn("Traceback", r.stderr, "%s -> raw traceback: %s" % (name, r.stderr[-300:]))
+            self.assertNotEqual(r.returncode, 0, "%s -> the report stayed GREEN" % name)
 
 
 if __name__ == "__main__":

@@ -1,17 +1,17 @@
-"""Az ügyelet-figyelő támadása — saját.
+"""An attack on the duty watcher — our own.
 
-Két javítás és két KIMONDOTT korlát.
+Two fixes and two STATED limits.
 
-  ZÁRVA 1 — a „jelentés" nem lehet pusztán a FÁJLNÉV: egy `touch`-olt vagy `{}`-t tartalmazó fájl eddig
-            jelentésnek számított, és ebből lett a felügyelői „jelentett és tétlen — jöhet a következő".
-            Mostantól szerkezeti szabály: a fájl a busz JSON-tükrének sora legyen, amit AZ AGENT küldött.
-  ZÁRVA 2 — EGYETLEN `alerted` kulcs volt minden riasztás-típusra, tehát az első riasztás a MÁSIKAT is
-            elnyomta a `remind_s` ablakban (pl. a „nincs panel" elnyomta a „beragadt-busy"-t). Típusonként.
+  CLOSED 1 — a "report" cannot be merely a FILE NAME: a `touch`ed file or one containing `{}` used to
+            count as a report, and that produced the supervisor's "reported and idle — the next one may go".
+            From now on a structural rule: the file must be a row of the bus JSON mirror sent BY THE AGENT.
+  CLOSED 2 — there was a SINGLE `alerted` key for every alert type, so the first alert suppressed the OTHER one too
+            within the `remind_s` window (e.g. "no pane" suppressed "stuck busy"). Per type.
 
-  KIMONDVA 1 — a kijelölés-fájl (`duty_active.json`) nincs hitelesítve: aki írni tudja, átírhatja, ki az
-            ügyeletes. A modul a SAJÁT gépünk felügyeleti segédje, nem bizalmi határ.
-  KIMONDVA 2 — a „dolgozik" bizonyítéka a panel tartalma, amit AZ AGENT ír. A bájt-hash + idő (beragadás)
-            ezt szűkíti, de nem teszi hamisíthatatlanná. Valódi bizonyíték a process-szintű CPU-idő lenne.
+  STATED 1 — the assignment file (`duty_active.json`) is not authenticated: whoever can write it can rewrite who is
+            on duty. The module is OUR OWN machine's supervision helper, not a trust boundary.
+  STATED 2 — the evidence of "working" is the pane's content, which THE AGENT writes. The byte hash + time (stuckness)
+            narrows this, but does not make it unforgeable. Real evidence would be process-level CPU time.
 
 stdlib unittest.
 """
@@ -47,44 +47,44 @@ class DutyHardening(unittest.TestCase):
     def count(self):
         return ad.count_reports_inbox("agentx", T0, bridge=self.tmp.name, supervisor="operator")
 
-    # ── kontroll: a valódi tükör-sor jelentés ───────────────────────────────
+    # ── control: a real mirror row is a report ───────────────────────────────
     def test_control_real_mirror_row_counts(self):
         self._report("agentx_1.json", json.dumps({"from": "agentx", "to": "operator", "kind": "msg",
                                                   "note": "kesz a meres"}))
         self.assertEqual(self.count(), 1)
 
-    # ── 1: a puszta fájlnév nem jelentés ────────────────────────────────────
+    # ── 1: a bare file name is not a report ────────────────────────────────────
     def test_touched_empty_file_is_not_a_report(self):
         self._report("agentx_2.json", "")
-        self.assertEqual(self.count(), 0, 'egy 0 bájtos fájl jelentésnek számított')
+        self.assertEqual(self.count(), 0, 'a 0-byte file counted as a report')
 
     def test_empty_json_object_is_not_a_report(self):
         self._report("agentx_3.json", "{}")
-        self.assertEqual(self.count(), 0, 'egy ures JSON-objektum jelentésnek számított')
+        self.assertEqual(self.count(), 0, 'an empty JSON object counted as a report')
 
     def test_report_from_someone_else_does_not_count(self):
-        self._report("agentx_4.json", json.dumps({"from": "masik", "to": "operator", "note": "nem az agenté"}))
-        self.assertEqual(self.count(), 0, "más nevében írt sor nem lehet az agent jelentése")
+        self._report("agentx_4.json", json.dumps({"from": "masik", "to": "operator", "note": "not the agent's"}))
+        self.assertEqual(self.count(), 0, "a row written in someone else's name cannot be the agent's report")
 
     def test_unparseable_file_does_not_count(self):
-        self._report("agentx_5.json", "{ ez nem json")
+        self._report("agentx_5.json", "{ this is not json")
         self.assertEqual(self.count(), 0)
 
-    # ── 2: típusonkénti riasztás-elnyomás ───────────────────────────────────
+    # ── 2: alert suppression per type ───────────────────────────────────
     def test_alert_types_do_not_suppress_each_other(self):
-        """A „nincs panel" riasztás nem nyomhatja el a „beragadt-busy" riasztást ugyanabban az ablakban."""
+        """The "no pane" alert cannot suppress the "stuck busy" alert in the same window."""
         now = T0
         st = {"no_pane_since": now - 3600}
         act, st = ad.decide(st, now=now, pane=None, asleep=False, reported=0, own_prefix="x")
         self.assertEqual(act, "alert")
-        self.assertIn("alerted_no_pane", st, "a riasztás-típusnak saját kulcsa van")
-        # ugyanabban a percben egy BERAGADT-busy panel: a másik típusnak meg kell szólalnia
+        self.assertIn("alerted_no_pane", st, "the alert type has its own key")
+        # in the same minute a STUCK-busy pane: the other type must speak up
         from unittest import mock
         st2 = dict(st)
         with mock.patch.object(ad.aw, "is_busy", lambda pane: True):
             act2, st2 = ad.decide(st2, now=now, pane="$ dolgozom", asleep=False, reported=0, own_prefix="x",
                                   busy_stuck_min=0)
-        self.assertEqual(act2, "alert", "a beragadt-busy riasztást elnyomta egy másik típus riasztása")
+        self.assertEqual(act2, "alert", "the stuck-busy alert was suppressed by another type's alert")
         self.assertIn("alerted_stuck", st2)
 
 

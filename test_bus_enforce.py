@@ -1,5 +1,5 @@
-"""bus_enforce (v1.4) — termék-mód kikényszerítés. Mátrix-ID-k: hamis feladó,
-replay, visszadátumozás, csatolmány-hamisítás, unsigned-downgrade. stdlib unittest + cryptography (ha van)."""
+"""bus_enforce (v1.4) — product-mode enforcement. Matrix IDs: forged sender,
+replay, backdating, attachment forgery, unsigned-downgrade. stdlib unittest + cryptography (if present)."""
 import json
 import os
 import sqlite3
@@ -25,7 +25,7 @@ def _keypair():
     return priv.private_bytes_raw(), pub.hex()
 
 
-@unittest.skipUnless(ab._A2_HAVE, "cryptography szükséges")
+@unittest.skipUnless(ab._A2_HAVE, "cryptography required")
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -66,7 +66,7 @@ class Mode(Base):
         self.assertEqual(enf.mode(), "dev")
         ab.send("carol", "bob", "unsigned hello", db=self.db, mirror=False)
         rows = ab.recv("bob", db=self.db)
-        self.assertEqual([r["body"] for r in rows], ["unsigned hello"])          # dev: érintetlen
+        self.assertEqual([r["body"] for r in rows], ["unsigned hello"])          # dev: untouched
 
     def test_marker_switches_to_product(self):
         open(os.path.join(os.environ["AGENT_BUS_DIR"], enf.MARKER), "w").close()
@@ -87,9 +87,9 @@ class Check(Base):
 
     def test_m6_unsigned_downgrade_rejected(self):
         m = self.signed(); m.pop("sig"); m.pop("pubkey")
-        # a PINELT név alatt csupasz sor a saját okával bukik — az elutasítás maga változatlan
+        # a bare row under the PINNED name fails with its own reason — the rejection itself is unchanged
         self.assertEqual(enf.check(m, keys_dir=self.keys), (False, "unsigned-pinned"))
-        # a registry által NEM ismert név csupasz sora: a régi, névtelen downgrade-ok
+        # a bare row of a name NOT known to the registry: the old, anonymous downgrade
         self.assertEqual(enf.check({**m, "sender": "nobody"}, keys_dir=self.keys), (False, "unsigned-downgrade"))
 
     def test_m1_forged_and_key_mismatch_rejected(self):
@@ -98,7 +98,7 @@ class Check(Base):
         self.assertEqual(enf.check({**m, "sender": "mallory"}, keys_dir=self.keys)[1], "forged")
 
     def test_m3_stale_and_future_ts_rejected(self):
-        old = self.signed(ts=time.time_ns() - 8 * 86400 * 10**9)                  # az ablak -7 nap
+        old = self.signed(ts=time.time_ns() - 8 * 86400 * 10**9)                  # the window is -7 days
         fut = self.signed(ts=time.time_ns() + 3600 * 10**9)
         self.assertEqual(enf.check(old, keys_dir=self.keys)[1], "stale-ts")
         self.assertEqual(enf.check(fut, keys_dir=self.keys)[1], "future-ts")
@@ -108,7 +108,7 @@ class Check(Base):
         s1 = enf.SeenStore("bob", base=self.state)
         self.assertEqual(enf.check(m, seen=s1, record=True, keys_dir=self.keys), (True, "ok"))
         self.assertEqual(enf.check(m, seen=s1, record=True, keys_dir=self.keys)[1], "replay")
-        s2 = enf.SeenStore("bob", base=self.state)                                # "újraindítás": új példány, ugyanaz a fájl
+        s2 = enf.SeenStore("bob", base=self.state)                                # "restart": a new instance, the same file
         self.assertEqual(enf.check(m, seen=s2, keys_dir=self.keys)[1], "replay")
 
     def test_peek_does_not_consume(self):
@@ -123,7 +123,7 @@ class Check(Base):
         m = self.signed(kind="attachment", body=desc)
         self.assertEqual(enf.check(m, keys_dir=self.keys), (True, "ok"))
         tampered = json.dumps({"sha256": "b" * 64, "size": 10, "media_type": "text/plain", "locator": "sha256:" + "b" * 64})
-        self.assertEqual(enf.check({**m, "body": tampered}, keys_dir=self.keys)[1], "forged")   # a leíró aláírt
+        self.assertEqual(enf.check({**m, "body": tampered}, keys_dir=self.keys)[1], "forged")   # the descriptor is signed
         bad = self.signed(kind="attachment", body=json.dumps({"sha256": h}))
         self.assertEqual(enf.check(bad, keys_dir=self.keys)[1], "attachment-descriptor")
 
@@ -137,13 +137,13 @@ class Check(Base):
 
 class RecvIntegration(Base):
     def test_product_recv_filters_and_logs_but_keeps_rows(self):
-        ab.send("carol", "bob", "unsigned", db=self.db, mirror=False)                 # aláíratlan (downgrade)
+        ab.send("carol", "bob", "unsigned", db=self.db, mirror=False)                 # unsigned (downgrade)
         ab.send("alice", "bob", "signed", db=self.db, mirror=False, sign_key=self.seed_path)
         with self.product():
             rows = ab.recv("bob", mark=True, db=self.db)
         self.assertEqual([r["body"] for r in rows], ["signed"])
         c = sqlite3.connect(self.db)
-        self.assertEqual(c.execute("SELECT COUNT(*) FROM messages WHERE recipient='bob'").fetchone()[0], 2)  # nincs törlés
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM messages WHERE recipient='bob'").fetchone()[0], 2)  # no deletion
         log = [json.loads(x) for x in open(os.path.join(self.state, "rejected.jsonl"))]
         self.assertEqual([r["reason"] for r in log], ["unsigned-downgrade"])
 
@@ -152,7 +152,7 @@ class RecvIntegration(Base):
         with self.product():
             self.assertEqual(len(ab.recv("bob", mark=True, db=self.db)), 1)
         c = sqlite3.connect(self.db)
-        with c:                                                                    # támadó: ugyanaz az aláírt sor újra beszúrva
+        with c:                                                                    # attacker: the same signed row inserted again
             c.execute("INSERT INTO messages(ts,sender,recipient,topic,kind,thread_id,in_reply_to,body,sig,pubkey) "
                       "SELECT ts,sender,recipient,topic,kind,thread_id,in_reply_to,body,sig,pubkey FROM messages WHERE id=1")
         with self.product():
@@ -175,7 +175,7 @@ class RecvIntegration(Base):
 
 
 class JointReviewPR4(Base):
-    """/2,..4,..5, — a mért reprodukciók regressziós tesztként."""
+    """/2,..4,..5, — the measured reproductions as regression tests."""
 
     def insert_signed(self, body, ts_off_s=0.0, recipient="bob"):
         m = self.signed(body=body, recipient=recipient, ts=time.time_ns() + int(ts_off_s * 1e9))
@@ -196,16 +196,16 @@ class JointReviewPR4(Base):
 
     # --- ---
     def test_B1_sleeping_recipient_gets_signed_mail_after_6_minutes(self):
-        self.insert_signed("SÜRGŐS: a mérés kész", ts_off_s=-360)
+        self.insert_signed("URGENT: the measurement is done", ts_off_s=-360)
         with self.product():
             rows = ab.recv("bob", mark=True, db=self.db)
-        self.assertEqual([r["body"] for r in rows], ["SÜRGŐS: a mérés kész"])
+        self.assertEqual([r["body"] for r in rows], ["URGENT: the measurement is done"])
 
     def test_B1_rejected_row_does_not_raise_delivered_and_is_reconcilable(self):
-        bad = ab.send("carol", "bob", "aláíratlan", db=self.db, mirror=False)
-        good = self.insert_signed("aláírt")
+        bad = ab.send("carol", "bob", "not signed", db=self.db, mirror=False)
+        good = self.insert_signed("signed row")
         with self.product(), mock.patch("sys.stderr"):
-            self.assertEqual([r["body"] for r in ab.recv("bob", mark=True, db=self.db)], ["aláírt"])
+            self.assertEqual([r["body"] for r in ab.recv("bob", mark=True, db=self.db)], ["signed row"])
         self.assertEqual(self.cursor(), (good, good))
         self.assertIn(bad, [m["id"] for m in ab.reconcile("bob", db=self.db)])
         self.assertIn(bad, [w["orig"] for w in ab.replay("bob", db=self.db)["would_replay"]])
@@ -213,7 +213,7 @@ class JointReviewPR4(Base):
         self.assertIsNone(c.execute("SELECT read_at FROM messages WHERE id=?", (bad,)).fetchone()[0])
 
     def test_B1_only_rejected_page_keeps_delivered_and_lists_in_reconcile(self):
-        bad = ab.send("carol", "bob", "aláíratlan", db=self.db, mirror=False)
+        bad = ab.send("carol", "bob", "not signed", db=self.db, mirror=False)
         with self.product(), mock.patch("sys.stderr"):
             self.assertEqual(ab.recv("bob", mark=True, db=self.db), [])
         self.assertEqual(self.cursor(), (bad, 0))
@@ -231,10 +231,10 @@ class JointReviewPR4(Base):
     def test_B2_unsigned_send_not_mirrored_in_product(self):
         inbox = os.path.join(self.tmp.name, "inbox")
         with self.product():
-            ab.send("eve", "mirror1", "ALÁÍRATLAN", db=self.db, inbox_root=inbox)
+            ab.send("eve", "mirror1", "NOT SIGNED", db=self.db, inbox_root=inbox)
         self.assertFalse(os.path.isdir(os.path.join(inbox, "mirror1")) and os.listdir(os.path.join(inbox, "mirror1")))
         with self.product():
-            ab.send("alice", "mirror1", "aláírt", db=self.db, inbox_root=inbox, sign_key=self.seed_path)
+            ab.send("alice", "mirror1", "signed row", db=self.db, inbox_root=inbox, sign_key=self.seed_path)
         files = os.listdir(os.path.join(inbox, "mirror1"))
         self.assertEqual(len(files), 1)
         rec = json.load(open(os.path.join(inbox, "mirror1", files[0])))
@@ -251,17 +251,17 @@ class JointReviewPR4(Base):
             r = subprocess.run(["bash", os.path.join(HERE, "tools", "inbox_watch.sh"), "x"], capture_output=True,
                                text=True, env=env, timeout=10)
         except subprocess.TimeoutExpired:
-            self.fail("inbox_watch.sh termék-módban is pollozza a kikényszerítetlen tükröt")
+            self.fail("inbox_watch.sh polls the unenforced mirror in product mode too")
         self.assertEqual(r.returncode, 3)
 
     def test_B2_filtered_watch_refuses_in_product(self):
-        """a partner-kar újramérés: a repó második, szűrt figyelője is megtagad termék-módban (rc=3)."""
+        """The partner arm's re-measurement: the repo's second, filtered watcher also refuses in product mode (rc=3)."""
         env = {**os.environ, "AGENT_BUS_MODE": "product"}
         try:
             r = subprocess.run(["bash", os.path.join(HERE, "tools", "inbox_watch_filtered_example.sh")], capture_output=True,
                                text=True, env=env, timeout=10)
         except subprocess.TimeoutExpired:
-            self.fail("inbox_watch_filtered_example.sh termék-módban is pollozza a kikényszerítetlen tükröt")
+            self.fail("inbox_watch_filtered_example.sh polls the unenforced mirror in product mode too")
         self.assertEqual(r.returncode, 3)
 
     # --- / ---
@@ -304,8 +304,8 @@ class JointReviewPR4(Base):
             self.assertEqual(ab.recv("bob", mark=True, db=self.db), [])
 
     def test_H3_audit_records_rejection_not_delivery(self):
-        bad = ab.send("carol", "bob", "aláíratlan", db=self.db, mirror=False)
-        self.insert_signed("aláírt")
+        bad = ab.send("carol", "bob", "not signed", db=self.db, mirror=False)
+        self.insert_signed("signed row")
         with self.product(), mock.patch("sys.stderr"):
             ab.recv("bob", mark=True, db=self.db)
         rows = ab.audit("bob", db=self.db)
@@ -317,16 +317,16 @@ class JointReviewPR4(Base):
 
     def test_H4_unwritable_enforce_dir_does_not_crash(self):
         blocker = os.path.join(self.tmp.name, "notadir"); open(blocker, "w").close()
-        ab.send("carol", "bob", "aláíratlan", db=self.db, mirror=False)
-        self.insert_signed("aláírt")
+        ab.send("carol", "bob", "not signed", db=self.db, mirror=False)
+        self.insert_signed("signed row")
         with self.product(), mock.patch.dict(os.environ, {"AGENT_BUS_ENFORCE_DIR": os.path.join(blocker, "x")}), \
                 mock.patch("sys.stderr"):
-            self.assertEqual([r["body"] for r in ab.recv("bob", mark=True, db=self.db)], ["aláírt"])
+            self.assertEqual([r["body"] for r in ab.recv("bob", mark=True, db=self.db)], ["signed row"])
 
     # ---..5 ---
     def test_M1_rejection_is_reported_on_stderr_also_for_peek(self):
         import io
-        ab.send("carol", "bob", "aláíratlan", db=self.db, mirror=False)
+        ab.send("carol", "bob", "not signed", db=self.db, mirror=False)
         err = io.StringIO()
         with self.product(), mock.patch("sys.stderr", err):
             self.assertEqual(ab.recv("bob", db=self.db), [])
@@ -336,24 +336,24 @@ class JointReviewPR4(Base):
         import shutil
         d = os.path.join(self.tmp.name, "partial"); os.makedirs(d)
         shutil.copy(os.path.join(HERE, "agent_bus.py"), d)
-        ab.send("claude", "pdep", "részleges deploy teszt", db=self.db, mirror=False)
+        ab.send("claude", "pdep", "partial deploy test", db=self.db, mirror=False)
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         env.update({"AGENT_BUS_DB": self.db, "AGENT_BUS_MODE": ""})
         r = subprocess.run([sys.executable, os.path.join(d, "agent_bus.py"), "recv", "--agent", "pdep"],
                            capture_output=True, text=True, env=env, timeout=60, cwd=d)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("részleges deploy teszt", r.stdout)
+        self.assertIn("partial deploy test", r.stdout)
         env["AGENT_BUS_MODE"] = "product"
         r = subprocess.run([sys.executable, os.path.join(d, "agent_bus.py"), "recv", "--agent", "pdep"],
                            capture_output=True, text=True, env=env, timeout=60, cwd=d)
-        self.assertNotIn("részleges deploy teszt", r.stdout)
+        self.assertNotIn("partial deploy test", r.stdout)
         self.assertNotIn("Traceback", r.stderr)
 
     def test_M4_peek_via_recv_does_not_consume(self):
         self.insert_signed("peekelt")
         with self.product():
             self.assertEqual(len(ab.recv("bob", db=self.db)), 1)
-            self.assertEqual(len(ab.recv("bob", db=self.db)), 1)                  # a watcher-poll kétszer peekel
+            self.assertEqual(len(ab.recv("bob", db=self.db)), 1)                  # the watcher poll peeks twice
             self.assertEqual([r["body"] for r in ab.recv("bob", mark=True, db=self.db)], ["peekelt"])
 
     def test_M5_enforcement_error_is_fail_closed_without_traceback_or_cursor_move(self):

@@ -1,58 +1,58 @@
-# AgentBus — közvetlen, alacsony-latenciájú agent-kommunikáció (design)
+# AgentBus — direct, low-latency agent communication (design)
 
-**Probléma (2026-06-20):** a `<AGENT_BRIDGE_DIR>/inbox/<agent>/*.json` fájl-postaláda nem valós idejű —
-„mindenki késve kapja meg az üzenetet". Ki kell dolgozni egy közvetlen-chat megoldást. Ha nagyon jó → eladható.
+**Problem (2026-06-20):** the `<AGENT_BRIDGE_DIR>/inbox/<agent>/*.json` file mailbox is not real-time —
+"everyone gets the message late". A direct-chat solution has to be worked out. If it is very good → it is sellable.
 
-## 1. A késleltetés GYÖKERE (mérve)
+## 1. The ROOT of the latency (measured)
 
-A szűk keresztmetszet **NEM a fájlrendszer.** A Claude-agentek **turn-alapúak, nem daemonok**: egy agent csak
-akkor olvassa az inboxát, amikor ÉPPEN lép (az operátora gépel → `UserPromptSubmit` hook → `inbox_check.sh`
-megmutatja). Egy **tétlen** agentnek **nincs „üzenet érkezett" eseménye** → az üzenet a címzett KÖVETKEZŐ lépéséig vár.
-Bármilyen transport (fájl, SQLite, socket) ugyanezzel néz szembe: a címzettnek **lépnie kell**, hogy feldolgozza.
+The bottleneck is **NOT the filesystem.** Claude agents are **turn-based, not daemons**: an agent reads its inbox only
+when it is TAKING A TURN (its operator types → `UserPromptSubmit` hook → `inbox_check.sh`
+shows it). An **idle** agent has **no "message arrived" event** → the message waits until the recipient's NEXT turn.
+Any transport (file, SQLite, socket) faces the same thing: the recipient **has to take a turn** to process it.
 
-⇒ Két, KÜLÖN megoldandó alprobléma: **(A) transport** (hogyan tárolt/rendezett) és **(B) ÉBRESZTÉS** (hogyan kap
-a tétlen agent lépést, amikor üzenet jön). A valódi újítás — és az eladható rész — a **(B) ébresztő-réteg.**
+⇒ Two sub-problems to solve SEPARATELY: **(A) transport** (how it is stored/ordered) and **(B) WAKING** (how the
+idle agent gets a turn when a message comes). The real innovation — and the sellable part — is **(B) the waking layer.**
 
-## 2. Megoldás — két réteg
+## 2. Solution — two layers
 
-### Réteg A — Bus transport (tiszta alap, alacsony kockázat)
-A sok race-elő JSON-fájl helyett **egy append-only SQLite (WAL) bus**: `<AGENT_BRIDGE_DIR>/bus.db`.
+### Layer A — Bus transport (a clean base, low risk)
+Instead of many racing JSON files, **one append-only SQLite (WAL) bus**: `<AGENT_BRIDGE_DIR>/bus.db`.
 ```
 messages(id INTEGER PK AUTOINCREMENT, ts, sender, recipient, topic, kind, thread_id, body, in_reply_to, read_at)
-cursors(agent, last_seen_id)          -- ki hol tart (a 'chat' = SELECT WHERE recipient=me AND id>cursor)
+cursors(agent, last_seen_id)          -- who is where (the 'chat' = SELECT WHERE recipient=me AND id>cursor)
 ```
-- **Rendezett** (monoton id), **atomikus** (WAL, egy író-tranzakció), **lekérdezhető** (thread, since-cursor).
-- **NINCS TÖRLÉS:** sosem DELETE; az archiválás = `read_at` + (külön) a meglévő JSON-archív megmarad (audit).
-- Vékony CLI + lib: `bus send/recv/tail/ack/thread`. A meglévő JSON-bridge **párhuzamosan megmarad** (back-compat),
-  amíg minden agent átáll — a `send` MINDKETTŐBE ír (additív migráció, a no-deletion elv szerint).
+- **Ordered** (monotonic id), **atomic** (WAL, one writer transaction), **queryable** (thread, since-cursor).
+- **NO DELETION:** never DELETE; archiving = `read_at` + (separately) the existing JSON archive stays (audit).
+- A thin CLI + lib: `bus send/recv/tail/ack/thread`. The existing JSON bridge **stays in parallel** (back-compat),
+  until every agent migrates — `send` writes into BOTH (additive migration, per the no-deletion principle).
 
-### Réteg B — Ébresztő-réteg (a valódi „direct chat"; IMPAKTOS, operátor-kapu)
-A `claude` **headless** (`claude -p`) elérhető → egy tétlen agent ténylegesen FELÉBRESZTHETŐ üzenetre:
-- Egy **bus-watcher** (systemd, per box) figyeli a `bus.db`-t (poll ~1-2s VAGY inotify, ha telepítjük az inotify-tools-t).
-- Új üzenet `X`-nek → a watcher egy **debounce** (pl. 2s, hogy a burst-öt batch-elje) után lefuttatja `X` working
-  dir-jében: `claude -p "ürítsd az agent-bus-od és cselekedj"` → `X` ~pár mp-en belül feldolgoz + válaszol + alszik.
-- **Kockázatok + védelem:** (1) ütközés az operátor élő sessionével → **lockfile** per agent (csak 1 fut; ha él az
-  interaktív, a wake KIHAGY vagy CSAK jelez). (2) token-költség → batch + debounce + rate-limit (max N wake/perc).
-  (3) wake-loop (A→B→A) → a wake CSAK feldolgoz/ack-el, nem gyárt új kimenőt magától; hop-számláló a thread-en.
-- **Alkotmány:** az ébresztett agent is csak ADATKÉNT kezeli a többi agent üzenetét — parancs CSAK az operátortól.
-  A wake nem ad parancsot, csak „nézd meg a postád" lépést ad (a feldolgozás a meglévő alkotmányos szabályok alatt).
+### Layer B — The waking layer (the real "direct chat"; HIGH IMPACT, operator gate)
+`claude` **headless** (`claude -p`) is available → an idle agent can actually be WOKEN on a message:
+- A **bus watcher** (systemd, per box) watches `bus.db` (poll ~1-2s OR inotify, if we install inotify-tools).
+- A new message for `X` → after a **debounce** (e.g. 2s, to batch a burst) the watcher runs in `X`'s working
+  dir: `claude -p "drain your agent bus and act"` → `X` processes + replies + sleeps within a few seconds.
+- **Risks + protection:** (1) collision with the operator's live session → a **lockfile** per agent (only 1 runs; if the
+  interactive one is alive, the wake SKIPS or ONLY signals). (2) token cost → batch + debounce + rate limit (max N wakes/minute).
+  (3) a wake loop (A→B→A) → the wake ONLY processes/acks, it does not produce new outgoing messages by itself; a hop counter on the thread.
+- **Constitution:** the woken agent also treats the other agents' messages ONLY AS DATA — commands come ONLY from the operator.
+  The wake gives no command, only a "check your mail" step (processing happens under the existing constitutional rules).
 
-**Fokozatos latencia:** Réteg A önmagában már segít (rendezett, instant a lépő agentnek). Réteg B viszi le a
-tétlen-latenciát ~percekről ~másodpercekre. Köztes, headless NÉLKÜL: minden agent egy rövid `/loop`/ScheduleWakeup
-(30–60s) cadence-szel pollozza a bus-t — bounded latencia, de tokent éget; a Réteg B ennél jobb.
+**Graduated latency:** Layer A alone already helps (ordered, instant for the agent taking a turn). Layer B brings the
+idle latency down from ~minutes to ~seconds. In between, WITHOUT headless: every agent polls the bus with a short `/loop`/ScheduleWakeup
+(30–60s) cadence — bounded latency, but it burns tokens; Layer B is better than that.
 
-## 3. Miért eladható (Sovereign + Provable illeszkedés)
-**„AgentBus" — szuverén, auditált, valós-idejű üzenetbusz autonóm AI-agent-csapatoknak EGY hoszton.**
-Nincs külső broker (no-external-AI), determinista rendezés, append-only **no-deletion audit-nyom**, on-box wake-push.
-Pont a mai állítás–bizonyíték árok: a multi-agent
-koordináció ma vagy felhő-SaaS (Slack/queue), vagy nincs — egy szuverén, bizonyíthatóan-auditált on-box busz hiánycikk.
+## 3. Why it is sellable (Sovereign + Provable fit)
+**"AgentBus" — a sovereign, audited, real-time message bus for autonomous AI agent teams on ONE host.**
+No external broker (no-external-AI), deterministic ordering, an append-only **no-deletion audit trail**, on-box wake push.
+Exactly today's claim–evidence gap: multi-agent
+coordination today is either cloud SaaS (Slack/queue), or absent — a sovereign, provably audited on-box bus is missing from the market.
 
-## 4. Fázisok (javaslat)
-- **P0 (most, alacsony kockázat, autonóm):** Réteg A — `bus.db` séma + `bus` CLI/lib + a `send` MINDKETTŐBE ír
-  (JSON-archív megmarad). A meglévő hook a bus-t is olvassa. Önmagában rendezett, kereshető, race-mentes.
-- **P1 (operátor-kapu):** Réteg B — bus-watcher (poll vagy inotify) + lockfile-védett headless wake, debounce/rate-limit.
-  Cross-agent rollout (a többi agent watcher-egységei) — koordináció a bridge-en.
-- **P2 (eladható csomag):** `bus tail -f` élő-chat nézet, presence („ki van ébren"), és a wake-protokoll dokumentálva.
+## 4. Phases (proposal)
+- **P0 (now, low risk, autonomous):** Layer A — the `bus.db` schema + the `bus` CLI/lib + `send` writes into BOTH
+  (the JSON archive stays). The existing hook reads the bus too. On its own ordered, searchable, race-free.
+- **P1 (operator gate):** Layer B — bus watcher (poll or inotify) + a lockfile-protected headless wake, debounce/rate limit.
+  Cross-agent rollout (the other agents' watcher units) — coordination on the bridge.
+- **P2 (sellable package):** a `bus tail -f` live-chat view, presence ("who is awake"), and the wake protocol documented.
 
-**DÖNTÉS, ami az üzemeltetőé:** a Réteg B headless-ébresztés impaktos (autonóm sessiont indít + token + cross-agent). A P0-t
-bármikor megépíthetem (reverzibilis, additív). A P1-hez kell a Te zöld utad (és a többi agent operátorának koordinációja).
+**A DECISION that belongs to the operator:** the Layer B headless waking is high impact (it starts an autonomous session + tokens + cross-agent). P0
+I can build any time (reversible, additive). P1 needs your green light (and coordination with the other agents' operators).

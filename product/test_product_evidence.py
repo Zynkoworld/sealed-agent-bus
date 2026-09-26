@@ -1,8 +1,8 @@
-"""A bizonyíték-boríték MOTORJÁNAK tesztjei — a validáló validálása.
+"""Tests of the evidence envelope's ENGINE — validating the validator.
 
-A padló ígérete: egy állítás csak akkor OK, ha a tesztjei zöldek a védelemmel és PIROSAK nélküle. Ezt magán a motoron
-is meg kell mérni: egy hatástalan mutációra a motornak NÉMA ZÖLD-et kell kiáltania, nem OK-t. Ugyanígy: a manifest-
-ellenőrzés vegye észre a módosított, hiányzó és többlet-fájlt, és a PENDING fejezet sose számítson OK-nak.
+The floor's promise: a claim is OK only if its tests are green with the guard and RED without it. This must be measured
+on the engine itself too: for an ineffective mutation the engine must cry SILENT GREEN, not OK. Likewise: the manifest
+check must notice a modified, a missing and a surplus file, and the PENDING chapter must never count as OK.
 stdlib unittest."""
 import json
 import os
@@ -19,7 +19,7 @@ import evidence as ev  # noqa: E402
 
 
 class FloorEngine(unittest.TestCase):
-    """A motor kis, gyors fán fut (nem a teljes repón): egy őr, egy teszt, és mutációk köré épített esetek."""
+    """The engine runs on a small, fast tree (not the full repo): one guard, one test, and cases built around mutations."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -35,7 +35,7 @@ class FloorEngine(unittest.TestCase):
         self.tmp.cleanup()
 
     def claims(self, find, replace):
-        return {"claims": [{"id": "proba", "claim": "a negatív bemenet elutasítva", "tests": ["test_guard.py"],
+        return {"claims": [{"id": "proba", "claim": "a negative input is rejected", "tests": ["test_guard.py"],
                             "peer_written": False, "mutation": {"file": "guarded.py", "find": find, "replace": replace}}]}
 
     def test_real_guard_removal_is_OK(self):
@@ -44,21 +44,21 @@ class FloorEngine(unittest.TestCase):
         self.assertNotEqual(r["mutated_rc"], 0)
 
     def test_ineffective_mutation_is_reported_as_a_silent_green(self):
-        """A mutáció csak egy megjegyzést ír át — a teszt zöld marad. Ez NEM OK, hanem néma zöld."""
-        r = ev.run_floor(self.tree, self.claims("# OR", "# ŐR (átírt megjegyzés)"))[0]
+        """The mutation only rewrites a comment — the test stays green. That is NOT OK, but a silent green."""
+        r = ev.run_floor(self.tree, self.claims("# OR", "# GUARD (rewritten comment)"))[0]
         self.assertEqual(r["status"], "FAIL")
         self.assertIn("SILENT GREEN", r["reason"])
 
     def test_mutation_that_does_not_apply_is_a_failure_not_a_pass(self):
-        r = ev.run_floor(self.tree, self.claims("nincs ilyen szöveg", "x"))[0]
+        r = ev.run_floor(self.tree, self.claims("no such text", "x"))[0]
         self.assertEqual(r["status"], "FAIL")
         self.assertIn("did not apply", r["reason"])
-        r2 = ev.run_floor(self.tree, self.claims("return True", "return True"))[0]   # kétszer szerepel? egyszer: ok
+        r2 = ev.run_floor(self.tree, self.claims("return True", "return True"))[0]   # present twice? once: ok
         self.assertIn(r2["status"], ("OK", "FAIL"))
 
     def test_failing_baseline_is_a_failure(self):
         with open(os.path.join(self.tree, "guarded.py"), "w") as f:
-            f.write("def belep(x):\n    return True\n")                    # az őr eleve nincs bent
+            f.write("def belep(x):\n    return True\n")                    # the guard is not in there to begin with
         r = ev.run_floor(self.tree, self.claims("return True", "return False"))[0]
         self.assertEqual(r["status"], "FAIL")
         self.assertIn("do not pass", r["reason"])
@@ -69,7 +69,7 @@ class ManifestCheck(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.tree = os.path.join(self.tmp.name, "fa")
         os.makedirs(os.path.join(self.tree, "product"))
-        for name, body in (("a.py", "print(1)\n"), ("product/b.txt", "kettő\n")):
+        for name, body in (("a.py", "print(1)\n"), ("product/b.txt", "two\n")):
             with open(os.path.join(self.tree, name), "w", encoding="utf-8") as f:
                 f.write(body)
         self.manifest = {"files": {rel: ev.sha256_file(p) for rel, p in ev.walk_tree(self.tree)}}
@@ -82,7 +82,7 @@ class ManifestCheck(unittest.TestCase):
 
     def test_modified_missing_and_extra_files_are_all_reported(self):
         with open(os.path.join(self.tree, "a.py"), "a") as f:
-            f.write("# egy karakter\n")
+            f.write("# one character\n")
         os.remove(os.path.join(self.tree, "product", "b.txt"))
         with open(os.path.join(self.tree, "uj.py"), "w") as f:
             f.write("x = 1\n")
@@ -98,9 +98,9 @@ class ManifestCheck(unittest.TestCase):
         self.assertEqual(ev.check_manifest(self.tree, self.manifest), [])
 
 
-@unittest.skipUnless(os.path.isfile(os.path.join(HERE, "evidence", "MANIFEST.json")), "a boríték még nincs megépítve")
+@unittest.skipUnless(os.path.isfile(os.path.join(HERE, "evidence", "MANIFEST.json")), "the envelope is not built yet")
 class ShippedEnvelope(unittest.TestCase):
-    """A repóban lévő, megépített borítékon: a vevő parancsa fut, és a manifest fog egy elrontott fájlt."""
+    """On the built envelope in the repo: the buyer's command runs, and the manifest catches a corrupted file."""
 
     def test_quick_verify_passes_on_this_tree(self):
         p = subprocess.run([sys.executable, os.path.join(HERE, "verify_evidence.py"), "--quick", "--json"],
@@ -117,7 +117,7 @@ class ShippedEnvelope(unittest.TestCase):
             copy = os.path.join(t, "sealed-bus")
             shutil.copytree(TREE, copy, ignore=shutil.ignore_patterns(*ev.SKIP_DIRS))
             with open(os.path.join(copy, "bus_notary.py"), "a", encoding="utf-8") as f:
-                f.write("# egy sor, amit senki nem kért\n")
+                f.write("# a line nobody asked for\n")
             p = subprocess.run([sys.executable, os.path.join(copy, "product", "verify_evidence.py"), "--quick", "--json"],
                                capture_output=True, text=True, timeout=600)
             rep = json.loads(p.stdout)
@@ -128,11 +128,11 @@ class ShippedEnvelope(unittest.TestCase):
 
 
 class PublishFurniture(unittest.TestCase):
-    """A publikált repó a lezárt termék FÖLÉ kap landing-fájlokat. A boríték ezekre azt mondta, hogy "not in the
-    manifest", és a publikált v1.5.1 emiatt megbukott a SAJÁT verifikálóján — egy független kar mérte ki.
+    """The published repo gets landing files ON TOP OF the sealed product. The envelope said "not in the
+    manifest" about them, and the published v1.5.1 therefore failed its OWN verifier — an independent arm measured it.
 
-    A javítás nem az, hogy a verifikáló elnézőbb lesz: a lyuknak PONTOS NEVEI vannak, a verifikáló KIMONDJA, mit
-    nem fed a pecsét, és minden más többlet-fájl változatlanul bukás."""
+    The fix is not that the verifier becomes more lenient: the hole has EXACT NAMES, the verifier STATES what
+    the seal does not cover, and every other surplus file is still a failure."""
 
     def _tree(self, files):
         t = tempfile.mkdtemp()
@@ -149,9 +149,9 @@ class PublishFurniture(unittest.TestCase):
     def test_furniture_does_not_break_the_seal_but_is_named(self):
         tree = self._tree({"agent_bus.py": "x = 1\n", "README.md": "# landing\n", "SECURITY.md": "report here\n"})
         man = self._manifest(tree, ["agent_bus.py"])
-        self.assertEqual(ev.check_manifest(tree, man), [], "a furniture megbuktatta a pecsétet")
+        self.assertEqual(ev.check_manifest(tree, man), [], "the furniture failed the seal")
         self.assertEqual(ev.unsealed_present(tree), ["README.md", "SECURITY.md"],
-                         "a verifikáló nem mondja ki, mit NEM fed a pecsét")
+                         "the verifier does not state what the seal does NOT cover")
 
     def test_any_other_unlisted_file_is_still_a_failure(self):
         tree = self._tree({"agent_bus.py": "x = 1\n", "smuggled.py": "import os\n"})
@@ -159,7 +159,7 @@ class PublishFurniture(unittest.TestCase):
         self.assertEqual([p["file"] for p in problems], ["smuggled.py"])
 
     def test_a_listed_furniture_file_is_still_hash_checked(self):
-        """Ha a furniture BEKERÜL a manifestbe, akkor onnantól a pecsét része — a kivétel csak a hiányra szól."""
+        """If the furniture GETS INTO the manifest, it is part of the seal from then on — the exception only covers absence."""
         tree = self._tree({"agent_bus.py": "x = 1\n", "README.md": "# landing\n"})
         man = self._manifest(tree, ["agent_bus.py", "README.md"])
         open(os.path.join(tree, "README.md"), "w", encoding="utf-8").write("# tampered\n")
@@ -167,12 +167,12 @@ class PublishFurniture(unittest.TestCase):
         self.assertEqual([p["problem"] for p in problems], ["content differs from the manifest"])
 
     def test_the_exemption_is_names_not_a_directory(self):
-        """Egy könyvtár-alakú kivétel magától nő, ahogy a könyvtár telik — ez a lyuk nem nőhet."""
+        """A directory-shaped exception grows by itself as the directory fills up — this hole must not grow."""
         for name in ev.UNSEALED:
             self.assertFalse(name.endswith("/"), name)
             self.assertNotIn("*", name)
             self.assertFalse(os.path.isabs(name), name)
-        self.assertLessEqual(len(ev.UNSEALED), 5, "a furniture-lista csendben tágul")
+        self.assertLessEqual(len(ev.UNSEALED), 5, "the furniture list is silently widening")
 
 
 if __name__ == "__main__":

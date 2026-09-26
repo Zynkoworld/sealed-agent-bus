@@ -1,15 +1,15 @@
-"""A termék-mód kapcsolója symlinkkel megkerülhető volt — (2026-09-17, KÖZEPES-MAGAS, feltételes).
+"""The product-mode switch could be bypassed with a symlink — (2026-09-17, MEDIUM-HIGH, conditional).
 
-A lelet: a marker keresési helyei a DB-fájl könyvtárából származtak `abspath`-tal, ami a symlinket NEM oldja fel.
-Egy marker nélküli könyvtárból a VALÓDI DB-re mutató symlinken át a mód `dev` lett, miközben ugyanazt a fájlt olvasta.
-a partner-kar négy mérése: A) symlink, rendszer-marker nincs → dev (megkerülve); B) symlink + rendszer-marker → product;
-C) valódi út → product; D) valódi út, rendszer-marker nélkül, DB-melletti marker → product.
+The finding: the marker's search locations were derived from the DB file's directory with `abspath`, which does NOT resolve a symlink.
+From a marker-less directory, through a symlink pointing to the REAL DB, the mode became `dev` while reading the same file.
+The partner arm's four measurements: A) symlink, no system marker → dev (bypassed); B) symlink + system marker → product;
+C) real path → product; D) real path, without a system marker, a marker next to the DB → product.
 
-A javítás: `realpath` a döntő hely (az abspath-os hely MARAD mellette — unió, fail-closed a termék-mód felé), a
-bus_dir/AGENT_BUS_DIR/BRIDGE alapokra is. És a doctor KIMONDJA a verdikt hatókörét: ez a folyamat, nem a flotta.
-Mutáns-próba: a realpath-sor nélkül `test_A_symlink_to_real_db_is_product` bukik.
+The fix: `realpath` is the deciding location (the abspath location STAYS beside it — a union, fail-closed towards product mode), for the
+bus_dir/AGENT_BUS_DIR/BRIDGE bases too. And doctor STATES the verdict's scope: this process, not the fleet.
+Mutant probe: without the realpath line `test_A_symlink_to_real_db_is_product` fails.
 
-stdlib unittest; izolált könyvtárak, SYSTEM_MARKER egy nem létező tmp-útra irányítva, az éles /etc-hez nem nyúl.
+stdlib unittest; isolated directories, SYSTEM_MARKER pointed to a non-existent tmp path, it does not touch the live /etc.
 """
 import os
 import sys
@@ -31,7 +31,7 @@ class MarkerFollowsTheRealFile(unittest.TestCase):
         open(os.path.join(self.real, enf.MARKER), "w").close()                  # a DB MELLETTI marker (D)
         self.alias = os.path.join(self.tmp.name, "alias"); os.makedirs(self.alias)
         self.link = os.path.join(self.alias, "bus.db")
-        os.symlink(self.db, self.link)                                          # marker NÉLKÜLI könyvtárból mutat rá
+        os.symlink(self.db, self.link)                                          # points to it from a directory WITHOUT a marker
         self._env = dict(os.environ)
         os.environ.pop(enf.MODE_ENV, None)
         os.environ.pop("AGENT_BUS_DIR", None)
@@ -65,15 +65,15 @@ class MarkerFollowsTheRealFile(unittest.TestCase):
         busreal = os.path.join(self.tmp.name, "busreal"); os.makedirs(busreal)
         open(os.path.join(busreal, enf.MARKER), "w").close()
         buslink = os.path.join(self.tmp.name, "buslink"); os.symlink(busreal, buslink)
-        # a symlink-en át adott bus_dir: az abspath-os hely ugyanoda mutat, a realpath-os is — mindkettő a listában
+        # a bus_dir given through a symlink: the abspath location points to the same place, the realpath one too — both in the list
         paths = enf.marker_paths(bus_dir=buslink, db=self.db)
         self.assertIn(os.path.join(busreal, enf.MARKER), paths)
         self.assertEqual(enf.mode(bus_dir=buslink, db=self.db), "product")
 
     def test_marker_paths_state_both_forms_realpath_first(self):
         paths = enf.marker_paths(bus_dir=self.alias, db=self.link)
-        self.assertEqual(paths[1], os.path.join(self.real, enf.MARKER))        # a valódi hely a döntő
-        self.assertIn(os.path.join(self.alias, enf.MARKER), paths)               # az abspath-os hely megmarad
+        self.assertEqual(paths[1], os.path.join(self.real, enf.MARKER))        # the real location is decisive
+        self.assertIn(os.path.join(self.alias, enf.MARKER), paths)               # the abspath location stays
 
 
 class DoctorStatesItsScope(unittest.TestCase):
@@ -83,11 +83,11 @@ class DoctorStatesItsScope(unittest.TestCase):
             _ok, lines = enf.doctor()
             scope = [l for l in lines if l.startswith("scope:")]
             self.assertEqual(len(scope), 1, lines)
-            self.assertIn("ERRE a folyamatra", scope[0])
-            self.assertIn("NINCS", scope[0])
+            self.assertIn("THIS process", scope[0])
+            self.assertIn("ABSENT", scope[0])
             open(enf.SYSTEM_MARKER, "w").close()
             _ok, lines = enf.doctor()
-            self.assertIn("MEGVAN", next(l for l in lines if l.startswith("scope:")))
+            self.assertIn("PRESENT", next(l for l in lines if l.startswith("scope:")))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""54Z nyitott tétele: a hazug pending/next_id a busz SAJÁT audit-láncával kerül ellentmondásba."""
+"""54Z's open item: a lying pending/next_id comes into contradiction with the bus's OWN audit chain."""
 import json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,7 +25,7 @@ class AuditCross(unittest.TestCase):
         self.tmp.cleanup()
 
     def swallow(self, lie):
-        """2/6 kiadva, a kurzor 6-ra ugrik; a napló HAZUDIK (a kör „teljesnek" látszik)."""
+        """2/6 delivered, the cursor jumps to 6; the log LIES (the round looks "complete")."""
         for i in range(1, 7):
             ab.send("hub", "peer", "t-%d" % i, db=self.db, mirror=False)
         rows = ab.recv("peer", mark=False, limit=ex.MAX_REPLIES, db=self.db, verify_sds=True)
@@ -43,7 +43,7 @@ class AuditCross(unittest.TestCase):
         return bn.export(self.env["AGENT_BUS_NOTARY_LOG"], 1), rcpts
 
     def test_lied_pending_is_caught_against_the_bus_audit(self):
-        recs, rcpts = self.swallow({"at": 0, "replies": 2, "pending": 2, "next_id": 0})   # hazugság: „nincs kiadatlan"
+        recs, rcpts = self.swallow({"at": 0, "replies": 2, "pending": 2, "next_id": 0})   # the lie: "nothing undelivered"
         audit = ab.audit_export("peer", db=self.db)
         self.assertTrue(ab.audit_chain_verify(audit)["ok"])
         without = bn.reconcile(recs, "peer", rcpts, trusted_pub=self.pub, strict=True)

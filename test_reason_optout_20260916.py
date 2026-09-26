@@ -1,4 +1,4 @@
-"""BLOCKER + NIT — a kurzor-detektorok nem kapcsolhatók ki a szabad szöveges `reason`-nel."""
+"""BLOCKER + NIT — the cursor detectors cannot be switched off with the free-text `reason`."""
 import json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bus_notary as bn

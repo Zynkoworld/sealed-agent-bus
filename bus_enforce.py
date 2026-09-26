@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""bus_enforce — KIKÉNYSZERÍTÉS. A támadási mátrix v0 fő lelete: a mai gyengeség NEM
-kriptográfiai, hanem kikényszerítési — a busz annotál, a döntést a fogadóra bízza, és a default ezt megengedi. A támadó
-nem az aláírást töri meg, hanem ELHAGYJA (unsigned-downgrade). Ez a modul a termék-profil kapuja.
+"""bus_enforce — ENFORCEMENT. The main finding of attack matrix v0: today's weakness is NOT
+cryptographic but one of enforcement — the bus annotates, leaves the decision to the receiver, and the default allows that. The attacker
+does not break the signature, it OMITS it (unsigned-downgrade). This module is the product profile's gate.
 
-Két üzemmód (egyetlen kapcsoló):
-- **dev** (alapértelmezett, ha semmi nincs beállítva): a mai back-compat viselkedés — az élő flotta nem törik el.
-- **product**: `AGENT_BUS_MODE=product` VAGY a `.product_mode.on` marker a busz könyvtárában. Ekkor a recv/verify
-  ELUTASÍT (nem csak jelöl):
-    * aláíratlan üzenet                              → `unsigned-downgrade`
-    * érvénytelen aláírás / registry-kulcs eltérés    → `forged`
-    * az aláírt `ts` az ablakon kívül (múlt / jövő)   → `stale-ts` / `future-ts`
-    * ugyanaz az aláírt tartalom másodszor            → `replay` — tartós seen-tár,
-      újraindítás után is
-    * `attachment` kind, ha a leíró nem az aláírt body része / hiányos → `attachment-descriptor`
-A termék-/kiadási profil a product módot állítja be; a `abus doctor` hangosan figyelmeztet, ha nincs bekapcsolva.
+Two operating modes (a single switch):
+- **dev** (the default, if nothing is set): today's back-compat behaviour — the live fleet does not break.
+- **product**: `AGENT_BUS_MODE=product` OR the `.product_mode.on` marker in the bus directory. Then recv/verify
+  REJECTS (not just marks):
+    * an unsigned message                              → `unsigned-downgrade`
+    * an invalid signature / registry key mismatch     → `forged`
+    * the signed `ts` outside the window (past / future) → `stale-ts` / `future-ts`
+    * the same signed content a second time            → `replay` — durable seen-store,
+      also after a restart
+    * `attachment` kind, if the descriptor is not part of the signed body / incomplete → `attachment-descriptor`
+The product/release profile sets product mode; `abus doctor` warns loudly if it is not on.
 
-Semmi nem törlődik: az elutasított sor a DB-ben marad, az elutasítás oka a `rejected.jsonl` naplóba kerül.
-A seen-tár append-only fájl (nem DB-séma) → NINCS SCHEMA_VERSION-bump.
+Nothing is deleted: the rejected row stays in the DB, the reason for rejection goes into the `rejected.jsonl` log.
+The seen-store is an append-only file (not the DB schema) → NO SCHEMA_VERSION bump.
 
-javítások (2026-09-14):
-- az ablak a feladási időre néz, a busz viszont alvó címzettre épül → alap ablak −7 nap/+300 s (a replay-
-  tár fogja a duplikátumot ablak nélkül is), és az elutasított sor NEM emeli a delivered_id-t, `enforce_reject` audit-
-  sort kap → a `reconcile`/`replay` látja (agent_bus.recv).
-- a mód NEM kapcsolható vissza dev-be env-vel: a marker a DB MELLETT és /etc/agent-bus alatt is keresett, az env
-  csak BEkapcsolhat; ismeretlen AGENT_BUS_MODE érték → product (fail-closed). Az ablak-env csak SZŰKÍTHET.
-- /a kézbesítő recv seen-tára a DB-ben él (`enforce_seen` tábla, a kurzor-tranzakción belül, folyamatok
-  közt atomi) — nincs külön, őrizetlen/másik UID-hez tartozó fájl. A `SeenStore` fájl-osztály megmarad (back-compat).
-- rossz env → alapérték + doctor-figyelmeztetés, nem traceback; a napló-írás best-effort.
+fixes (2026-09-14):
+- the window looks at the send time, but the bus builds on sleeping recipients → default window −7 days/+300 s (the replay
+  store catches the duplicate even without a window), and a rejected row does NOT raise delivered_id, it gets an `enforce_reject` audit
+  row → `reconcile`/`replay` sees it (agent_bus.recv).
+- the mode CANNOT be switched back to dev with env: the marker is looked up NEXT TO the DB and under /etc/agent-bus too, env
+  can only switch it ON; an unknown AGENT_BUS_MODE value → product (fail-closed). The window env can only NARROW.
+- /the delivering recv's seen-store lives in the DB (`enforce_seen` table, inside the cursor transaction, atomic across
+  processes) — no separate, unguarded file belonging to another UID. The `SeenStore` file class remains (back-compat).
+- a bad env → default + doctor warning, not a traceback; log writing is best-effort.
 """
 from __future__ import annotations
 
@@ -39,24 +39,24 @@ import time
 BRIDGE = os.environ.get("AGENT_BRIDGE_DIR", os.path.expanduser("~/.agentbus"))
 MODE_ENV = "AGENT_BUS_MODE"
 MARKER = ".product_mode.on"
-SYSTEM_MARKER = "/etc/agent-bus/product_mode.on"         # rendszerszintű, root-kezelt kapcsoló
-DEFAULT_WINDOW_PAST_S = 7 * 24 * 3600                     # alvó címzett is megkapja (a replay-tár fogja a dupla)
+SYSTEM_MARKER = "/etc/agent-bus/product_mode.on"         # system-level, root-managed switch
+DEFAULT_WINDOW_PAST_S = 7 * 24 * 3600                     # a sleeping recipient gets it too (the replay store catches duplicates)
 DEFAULT_WINDOW_FUTURE_S = 300
-WARNINGS = []                                             # a doctor mutatja (nem traceback)
+WARNINGS = []                                             # shown by doctor (not a traceback)
 
 
 def _env_window(name, default):
-    """Ablak env-ből: CSAK szűkíthet. Érvénytelen / nem pozitív / tágító érték → alapérték + figyelmeztetés."""
+    """Window from env: can ONLY narrow. An invalid / non-positive / widening value → default + warning."""
     raw = (os.environ.get(name) or "").strip()
     if not raw:
         return default
     try:
         v = int(raw)
     except ValueError:
-        WARNINGS.append("%s=%r érvénytelen → alapérték %ds" % (name, raw, default))
+        WARNINGS.append("%s=%r invalid → default %ds" % (name, raw, default))
         return default
     if v <= 0 or v > default:
-        WARNINGS.append("%s=%d figyelmen kívül (csak 1..%d szűkíthet) → %ds" % (name, v, default, default))
+        WARNINGS.append("%s=%d ignored (only 1..%d can narrow) → %ds" % (name, v, default, default))
         return default
     return v
 
@@ -71,12 +71,12 @@ def state_dir():
 
 
 def marker_paths(bus_dir=None, db=None):
-    """A termék-mód markerének MINDEN keresési helye (unió). a DB-fájl melletti marker a döntő — egy env-vel
-    átirányított AGENT_BRIDGE_DIR/AGENT_BUS_DIR csak TOVÁBBI helyet ad, a DB mellettit/rendszerszintűt nem veszi el."""
+    """EVERY search location of the product-mode marker (union). The marker next to the DB file is decisive — an env-
+    redirected AGENT_BRIDGE_DIR/AGENT_BUS_DIR only ADDS locations, it does not take away the one next to the DB/the system one."""
     import agent_bus as ab
-    # (2026-09-17): az `abspath` a symlinket NEM oldja fel — egy marker nélküli könyvtárból a VALÓDI DB-re mutató
-    # symlink dev módot adott, miközben ugyanazt a fájlt olvasta. A `realpath` a döntő hely; az abspath-os hely MARAD
-    # mellette (unió: több hely = fail-closed a termék-mód felé, sosem kevesebb).
+    # (2026-09-17): `abspath` does NOT resolve a symlink — a symlink from a marker-less directory pointing to the REAL DB
+    # gave dev mode while reading the same file. `realpath` is the decisive location; the abspath location STAYS
+    # beside it (union: more locations = fail-closed towards product mode, never fewer).
     dbp = db or ab.DB
     paths = [SYSTEM_MARKER,
              os.path.join(os.path.dirname(os.path.realpath(dbp)), MARKER),
@@ -89,14 +89,14 @@ def marker_paths(bus_dir=None, db=None):
 
 
 def mode(bus_dir=None, db=None):
-    """'product' ha env vagy BÁRMELYIK marker mondja, különben 'dev' (back-compat). Az env csak BEkapcsolhat: ha marker
-    van, `AGENT_BUS_MODE=dev` sem kapcsol vissza. Ismeretlen érték (pl. 'production', 'prod') → product.
-    A NÉMA VISSZAESÉS elleni védelem NEM külön mechanizmus: a root-kezelt `SYSTEM_MARKER`
-    (/etc/agent-bus/product_mode.on) pontosan ezt adja — azt csak root törölheti, a busz-melletti markert viszont
-    bárki, aki a buszra ír. A „ragadós termék-mód" (a busz megjegyzi, hogy futott már termék-módban) MEGÉPÜLT és
-    KÉTSZER VISSZAVONVA: mérve mindkétszer a TERMELŐ busz DB-jét olvasta/írta olyan hívásokból, amik csak mérésnek
-    készültek (a modul-szintű út feloldása miatt), és 20 tesztet döntött be. A helyes lépés üzemeltetői: tedd ki a
-    root-tulajdonú markert; ezt a `doctor()` hangosan meg is követeli."""
+    """'product' if env or ANY marker says so, otherwise 'dev' (back-compat). Env can only switch it ON: if there is a marker,
+    even `AGENT_BUS_MODE=dev` does not switch back. An unknown value (e.g. 'production', 'prod') → product.
+    The protection against SILENT FALLBACK is NOT a separate mechanism: the root-managed `SYSTEM_MARKER`
+    (/etc/agent-bus/product_mode.on) gives exactly that — only root can delete it, while the marker next to the bus
+    can be deleted by anyone who writes to the bus. A "sticky product mode" (the bus remembers it has run in product mode) WAS BUILT and
+    WITHDRAWN TWICE: measured, both times it read/wrote the PRODUCTION bus DB from calls meant only as
+    measurement (because of the module-level path resolution), and it failed 20 tests. The correct step is operational: put down the
+    root-owned marker; `doctor()` loudly demands this too."""
     raw = os.environ.get(MODE_ENV, "").strip().lower()
     if raw and raw != "dev":
         return "product"
@@ -104,9 +104,9 @@ def mode(bus_dir=None, db=None):
 
 
 class DbSeenStore:
-    """/a replay-tár a busz-DB-ben (`enforce_seen`), a HÍVÓ kapcsolatán/tranzakcióján → a kurzor-mozgással
-    atomi, folyamatok közt szerializált (BEGIN IMMEDIATE), és pontosan annyira védett, mint maguk az üzenetek (aki ezt
-    törölni tudja, az a messages-t is átírhatja). Lusta tábla (verify_schema csak a mag-táblákat nézi) → nincs séma-bump."""
+    """/the replay store in the bus DB (`enforce_seen`), on the CALLER's connection/transaction → atomic with the
+    cursor move, serialized across processes (BEGIN IMMEDIATE), and exactly as protected as the messages themselves (whoever
+    can delete it can also rewrite messages). A lazy table (verify_schema only looks at the core tables) → no schema bump."""
 
     def __init__(self, conn, recipient):
         self.c, self.agent = conn, recipient
@@ -121,7 +121,7 @@ class DbSeenStore:
             return self.c.execute("SELECT 1 FROM enforce_seen WHERE agent=? AND k=?", (self.agent, key)).fetchone() is not None
         except sqlite3.OperationalError as e:
             if "no such table" in str(e):
-                return False                                  # még semmi nem volt kézbesítve termék-módban
+                return False                                  # nothing has been delivered in product mode yet
             raise
 
     def add(self, key, ts_s):
@@ -130,9 +130,9 @@ class DbSeenStore:
 
 
 def content_key(msg):
-    """Az aláírt tartalom azonosítója a replay-tárhoz: sha256(aláírt bájtkép || sig). Az id NEM része (egy újra
-    beszúrt, azonos tartalmú sor új id-t kap — pont ezt kell megfogni)."""
-    import agent_bus as ab                                     # késői import: nincs körkörös betöltés
+    """The signed content's identifier for the replay store: sha256(signed byte image || sig). The id is NOT part of it (a re-
+    inserted row with identical content gets a new id — exactly that must be caught)."""
+    import agent_bus as ab                                     # late import: no circular loading
     h = hashlib.sha256(ab._a2_content_bytes(msg))
     h.update(b"|")
     h.update((msg.get("sig") or "").encode())
@@ -140,9 +140,9 @@ def content_key(msg):
 
 
 class SeenStore:
-    """Tartós, append-only seen-tár címzettenként (JSONL: {"k", "ts_s"}). Újraindítás után is megfogja a replayt.
-    Tömörítés (compact): csak a frissességi ablakon + tartalékon KÍVÜLI, már biztosan elavult kulcsokat hagyja el —
-    ablakon belüli bejegyzést SOSEM (az ablakon kívüli ts-t a freshness-kapu úgyis elutasítja)."""
+    """A durable, append-only seen-store per recipient (JSONL: {"k", "ts_s"}). Catches replay even after a restart.
+    Compaction (compact): drops only keys OUTSIDE the freshness window + margin, which are certainly stale —
+    NEVER an entry inside the window (the freshness gate rejects a ts outside the window anyway)."""
 
     def __init__(self, recipient, base=None, window_past=None):
         self.path = os.path.join(base or state_dir(), "seen_%s.jsonl" % _safe(recipient))
@@ -183,7 +183,7 @@ class SeenStore:
             return True
 
     def compact(self, now_s=None):
-        """Az ablak kétszeresénél régebbi kulcsok elhagyása atomi cserével. Visszaadja a megtartott darabszámot."""
+        """Drop keys older than twice the window, with an atomic swap. Returns the number kept."""
         now_s = time.time() if now_s is None else now_s
         with self._lock:
             keys = self._load()
@@ -204,7 +204,7 @@ def _safe(s):
 
 
 def _ts_seconds(ts):
-    """A busz ts-e nanoszekundum (time.time_ns); a teszt/kézi sorok másodpercet is adhatnak."""
+    """The bus ts is in nanoseconds (time.time_ns); test/manual rows may give seconds."""
     try:
         v = int(ts)
     except (TypeError, ValueError):
@@ -213,8 +213,8 @@ def _ts_seconds(ts):
 
 
 def attachment_ok(msg):
-    """Az attachment leíró az ALÁÍRT body-ban él (a body része az aláírt mezőknek, _A2_SIGNED_FIELDS), és a bus_attach
-    zárt leíró-szerződésének megfelel — ugyanaz a validátor, amit a send is használ (nincs második, eltérő szabály)."""
+    """The attachment descriptor lives in the SIGNED body (the body is one of the signed fields, _A2_SIGNED_FIELDS), and conforms to
+    bus_attach's closed descriptor contract — the same validator send uses (no second, different rule)."""
     import bus_attach
     try:
         bus_attach.check_descriptor(msg.get("body") or "")
@@ -225,8 +225,8 @@ def attachment_ok(msg):
 
 def check(msg, *, now_s=None, seen=None, record=False, keys_dir=None,
           window_past=None, window_future=None):
-    """Egy recv-elt sor termék-módú ítélete → (ok: bool, ok_vagy_ok: str). `record=True` esetén (kézbesítő recv)
-    az elfogadott tartalom bekerül a seen-tárba; peek-nél csak ellenőriz, nem fogyaszt."""
+    """The product-mode verdict on a recv'd row → (ok: bool, reason: str). With `record=True` (delivering recv)
+    the accepted content goes into the seen-store; on peek it only checks, does not consume."""
     import agent_bus as ab
     now_s = time.time() if now_s is None else now_s
     wp = WINDOW_PAST_S if window_past is None else window_past
@@ -235,7 +235,7 @@ def check(msg, *, now_s=None, seen=None, record=False, keys_dir=None,
     if auth == "unsigned":
         return False, "unsigned-downgrade"
     if auth == "unsigned-pinned":
-        # csupasz sor egy aláírásra képes (pinelt) név alatt — külön ok, nem olvad az unsigned-ba
+        # a bare row under a name able to sign (pinned) — a separate reason, does not blend into unsigned
         return False, "unsigned-pinned"
     if auth != "signed":
         return False, "forged"
@@ -249,24 +249,24 @@ def check(msg, *, now_s=None, seen=None, record=False, keys_dir=None,
     if (msg.get("kind") or "") == "attachment" and not attachment_ok(msg):
         return False, "attachment-descriptor"
     if record and seen is None:
-        # Saját a `record=True` FOGYASZTÁST jelent — seen-tár nélkül a replay-védelem némán kimarad.
-        # A peek/osztályozó hívások `record=False`-szal jönnek; ez az ág programozói hiba, nem üzemi állapot.
-        raise ValueError("record=True esetén kötelező a seen-tár (replay-védelem)")
+        # `record=True` means CONSUMPTION — without a seen-store replay protection is silently skipped.
+        # Peek/classifier calls come with `record=False`; this branch is a programming error, not an operational state.
+        raise ValueError("record=True requires a seen-store (replay protection)")
     if seen is not None:
         key = content_key(msg)
         if seen.seen(key):
             return False, "replay"
         if record and not seen.add(key, ts):
-            # Saját a `seen()` és az `add()` között versenyhelyzet van (két párhuzamos recv). Az
-            # `add()` FALSE-a ("már bent volt") az egyetlen atomi jel — enélkül mindkét fél kézbesített volna.
+            # There is a race between `seen()` and `add()` (two concurrent recvs). The
+            # `add()` returning FALSE ("was already in") is the only atomic signal — without it both sides would have delivered.
             return False, "replay"
     return True, "ok"
 
 
 def log_rejected(agent, msg, reason, base=None):
-    """Az elutasítás naplója (append-only; a sor maga a DB-ben marad — semmi nem törlődik)."""
-    # /best-effort — egy nem írható (más UID-é, nem könyvtár) napló-hely SOSEM dönti be a recv-et;
-    # a mérvadó nyom az `enforce_reject` audit-sor a DB-ben. -> True ha íródott.
+    """The rejection log (append-only; the row itself stays in the DB — nothing is deleted)."""
+    # /best-effort — an unwritable log location (another UID's, not a directory) NEVER fails the recv;
+    # the authoritative trace is the `enforce_reject` audit row in the DB. -> True if written.
     try:
         p = os.path.join(base or state_dir(), "rejected.jsonl")
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -279,23 +279,23 @@ def log_rejected(agent, msg, reason, base=None):
 
 
 def doctor():
-    """Állapot-jelentés a termék-profilhoz. -> (ok: bool, sorok: list[str])."""
+    """Status report for the product profile. -> (ok: bool, lines: list[str])."""
     import agent_bus as ab
     lines, ok = [], True
     m = mode()
     if m != "product":
         ok = False
-        lines.append("!!! FIGYELEM: a busz DEV módban fut — aláíratlan és elavult üzenetet is kézbesít. "
-                     "Termék-profilhoz: AGENT_BUS_MODE=product vagy %s marker." % MARKER)
+        lines.append("!!! WARNING: the bus runs in DEV mode — it delivers unsigned and stale messages too. "
+                     "For the product profile: AGENT_BUS_MODE=product or the %s marker." % MARKER)
     else:
-        lines.append("mode: product (aláírás kötelező, ts-ablak -%ds/+%ds, replay-tár: %s)" % (WINDOW_PAST_S, WINDOW_FUTURE_S, state_dir()))
-    # (2026-09-17): a mód FOLYAMATONKÉNT dől el (env + fájl-létezés), a doctor a SAJÁT környezetében mér. Egy
-    # másik folyamat ugyanabban a pillanatban dev-ben futhat. A verdikt hatóköre ezért KIMONDVA kisebb, mint a
-    # termék-profil (flotta-szintű) ígérete; ami flotta-szinten áll, az a root-kezelt SYSTEM_MARKER léte.
-    lines.append("scope: ez a verdikt ERRE a folyamatra áll (env %s=%r + marker-létezés); más folyamat más módban futhat. "
-                 "Flotta-szintű állítást csak a root-kezelt %s ad%s."
+        lines.append("mode: product (signature required, ts window -%ds/+%ds, replay store: %s)" % (WINDOW_PAST_S, WINDOW_FUTURE_S, state_dir()))
+    # (2026-09-17): the mode is decided PER PROCESS (env + file existence); doctor measures in ITS OWN environment. Another
+    # process may run in dev at the same moment. So the verdict's scope is STATED as smaller than the
+    # product profile's (fleet-level) promise; what stands at fleet level is the existence of the root-managed SYSTEM_MARKER.
+    lines.append("scope: this verdict holds for THIS process (env %s=%r + marker existence); another process may run in another mode. "
+                 "Only the root-managed %s gives a fleet-level claim%s."
                  % (MODE_ENV, os.environ.get(MODE_ENV, ""), SYSTEM_MARKER,
-                    " — MEGVAN" if os.path.exists(SYSTEM_MARKER) else " — NINCS"))
+                    " — PRESENT" if os.path.exists(SYSTEM_MARKER) else " — ABSENT"))
     for w in WARNINGS:
         lines.append("! " + w)
     for p in marker_paths():
@@ -304,16 +304,16 @@ def doctor():
         except OSError:
             continue
         if st.st_uid != 0 or (st.st_mode & 0o022):
-            lines.append("! a marker (%s) nem root-tulajdonú vagy csoport/világ-írható — bárki törölheti; "
-                         "javasolt: %s (root, 0644)" % (p, SYSTEM_MARKER))
-    # Saját ha a termék-mód KIZÁRÓLAG egy busz-melletti markeren áll, akkor aki üzenetet tud
-    # beszúrni, a markert is törölheti -> a kapu NÉMÁN dev-re esik, és onnantól aláíratlan sort is kézbesít.
+            lines.append("! the marker (%s) is not root-owned or is group/world-writable — anyone can delete it; "
+                         "recommended: %s (root, 0644)" % (p, SYSTEM_MARKER))
+    # if product mode rests SOLELY on a marker next to the bus, then whoever can
+    # insert a message can also delete the marker -> the gate SILENTLY falls to dev, and from then on delivers unsigned rows too.
     if m == "product" and not os.environ.get(MODE_ENV, "").strip() and not os.path.exists(SYSTEM_MARKER):
         ok = False
-        lines.append("!!! a termék-mód CSAK busz-melletti markeren áll (%s nincs, env nincs) — aki a buszra írni tud, "
-                     "a markert is törölheti, és a kapu némán dev-re esik. Tegyél root-tulajdonú markert: %s"
+        lines.append("!!! product mode rests ONLY on a marker next to the bus (%s absent, env absent) — whoever can write to the bus "
+                     "can also delete the marker, and the gate silently falls to dev. Put down a root-owned marker: %s"
                      % (SYSTEM_MARKER, SYSTEM_MARKER))
     if not ab._A2_HAVE:
         ok = False
-        lines.append("!!! a 'cryptography' csomag hiányzik — aláírás nem ellenőrizhető (product módban minden sor forged)")
+        lines.append("!!! the 'cryptography' package is missing — signatures cannot be checked (in product mode every row is forged)")
     return ok, lines

@@ -1,4 +1,4 @@
-"""BLOCKER/HIGH — a VALÓDI kiadási úton (bus_ssh_exchange._exchange) mérve."""
+"""BLOCKER/HIGH — measured on the REAL delivery path (bus_ssh_exchange._exchange)."""
 import json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -55,7 +55,7 @@ class RealReleasePath(unittest.TestCase):
         self.assertEqual(ab.ack_preview("peer", 6, db=self.db), (0, 6))
 
     def test_swallowing_round_is_accused(self):
-        """Csonkolt kör (2/6 kiadva), a kurzor mégis a kiadatlan posta fölé megy -> hard vád."""
+        """A truncated round (2/6 delivered), yet the cursor goes above the undelivered mail -> a hard accusation."""
         for i in range(1, 7):
             ab.send("hub", "peer", "t-%d" % i, db=self.db, mirror=False)
         rows = ab.recv("peer", mark=False, limit=ex.MAX_REPLIES, db=self.db, verify_sds=True)
@@ -75,7 +75,7 @@ class RealReleasePath(unittest.TestCase):
         self.assertFalse(rep["ok"])
 
     def test_honest_truncated_round_is_not_accused(self):
-        """Becsületes csonkolás: a kurzor a kiadatlan maradék ALATT marad -> nincs vád."""
+        """Honest truncation: the cursor stays BELOW the undelivered remainder -> no accusation."""
         for i in range(1, 7):
             ab.send("hub", "peer", "t-%d" % i, db=self.db, mirror=False)
         rows = ab.recv("peer", mark=False, limit=ex.MAX_REPLIES, db=self.db, verify_sds=True)
@@ -94,7 +94,7 @@ class RealReleasePath(unittest.TestCase):
         self.assertNotIn("cursor_skips_undelivered", [d["type"] for d in rep["discrepancies"]])
 
     def test_verify_reads_the_structured_cursor(self):
-        """a verify a gépi mezőt olvassa — üres reason mellett is látja a hamis kurzor-célt."""
+        """verify reads the machine field — it sees the false cursor target even with an empty reason."""
         self.n.record(envelope={"a": 1}, sender_identity="peer", sender_auth="ssh-key", recipient="peer", kind="ack",
                       decision="accepted", reason="", cursor={"from": 0, "to": 9, "ack": 0})
         rep = bn.verify(bn.export(self.env["AGENT_BUS_NOTARY_LOG"], 1))
@@ -106,10 +106,10 @@ if __name__ == "__main__":
 
 
 class GlmRound10(RealReleasePath):
-    """a javításon: (A) néma kettős hiba, (C) high-water lyuk."""
+    """on the fix: (A) silent double failure, (C) high-water hole."""
 
     def test_c_unread_hole_lowers_the_highwater(self):
-        """ha egy alacsonyabb id-jű üzenet OLVASATLAN marad, a vízszint nem maradhat fölötte."""
+        """if a lower-id message stays UNREAD, the water level cannot stay above it."""
         self.release(3)
         c = ab._conn(self.db)
         before = c.execute("SELECT delivered_id FROM cursors WHERE agent='peer'").fetchone()["delivered_id"]
@@ -120,7 +120,7 @@ class GlmRound10(RealReleasePath):
         after = c.execute("SELECT delivered_id FROM cursors WHERE agent='peer'").fetchone()["delivered_id"]
         c.close()
         self.assertEqual(before, 3)
-        self.assertEqual(after, 1, "a vízszint az összefüggő prefix teteje (1), nem a régi 3")
+        self.assertEqual(after, 1, "the water level is the top of the contiguous prefix (1), not the old 3")
 
     def test_a_double_failure_is_fail_closed(self):
         import unittest.mock as mock
@@ -133,29 +133,29 @@ class GlmRound10(RealReleasePath):
                                                                             reason="r", cursor={"at": 0, "replies": 3,
                                                                                                 "pending": 3, "next_id": 0})]
                                + [OSError("log")] * 10):
-            with self.assertRaises(ex._NotaryWriteFailed):        # fail-closed: a hívó üres/hibás választ ad, posta nem megy ki
+            with self.assertRaises(ex._NotaryWriteFailed):        # fail-closed: the caller gives an empty/error response, no mail goes out
                 ex._exchange("peer", json.dumps({"messages": [], "ack": 0}), db=self.db,
                              attach_root=os.path.join(self.tmp.name, "att"), notary=self.n)
 
 
 class TransientAndReplay(RealReleasePath):
-    """az egyik kar + átmeneti/végleges elutasítás, per-id lezárás, replay-idempotencia."""
+    """one arm + transient/permanent rejection, per-id closing, replay idempotence."""
 
     def test_glm_a_per_id_close_does_not_silence_a_gap(self):
         for i in range(1, 4):
             ab.send("hub", "peer", "t-%d" % i, db=self.db, mirror=False)
-        ab.mark_delivered("peer", [1, 3], db=self.db)            # a 2-es NINCS kézbesítve
+        ab.mark_delivered("peer", [1, 3], db=self.db)            # number 2 is NOT delivered
         rows = ab.audit_export("peer", db=self.db)
         covered = {(r["from_id"], r["to_id"]) for r in rows if r["op"] == "remote_delivered"}
-        self.assertEqual(covered, {(1, 1), (3, 3)}, "id-szintű sorok kellenek, nem tartomány")
+        self.assertEqual(covered, {(1, 1), (3, 3)}, "id-level rows are needed, not a range")
 
     def test_glm_c_replay_is_idempotent(self):
-        """A mentőövbe került sor csak EGYSZER replay-elhető (a második hívás nem gyárt új másolatot)."""
+        """A row that got into the lifeboat can be replayed only ONCE (the second call does not produce a new copy)."""
         for i in range(1, 3):
             ab.send("hub", "peer", "t-%d" % i, db=self.db, mirror=False)
-        ab.recv("peer", mark=True, db=self.db)                    # kurzor 2, vízszint 2
+        ab.recv("peer", mark=True, db=self.db)                    # cursor 2, water level 2
         c = ab._conn(self.db)
-        with c:                                                   # elutasított sor nyoma: a mentőöv innen látja
+        with c:                                                   # a rejected row's trace: the lifeboat sees it from here
             c.execute("UPDATE messages SET read_at=NULL WHERE id=1")
             ab._append_audit(c, "peer", 1, 1, "enforce_reject:stale-ts", 1)
         c.close()
@@ -163,10 +163,10 @@ class TransientAndReplay(RealReleasePath):
         first = ab.replay("peer", commit=True, db=self.db)
         second = ab.replay("peer", commit=True, db=self.db)
         self.assertEqual(len(first["replayed"]), 1)
-        self.assertEqual(second["replayed"], [], "ugyanaz a sor másodszor nem replay-elhető")
+        self.assertEqual(second["replayed"], [], "the same row cannot be replayed a second time")
 
     def test_glm_d_old_forged_row_does_not_pin_the_cursor(self):
-        """Régi (a türelmi időn túli) forged sor VÉGLEGES -> a vízszint átlépheti; friss -> megvárja."""
+        """An old (beyond the grace period) forged row is PERMANENT -> the water level may step over it; a fresh one -> it waits."""
         import bus_enforce
         self.assertIn("future-ts", ab.TRANSIENT_REJECT)
         self.assertNotIn("forged", ab.TRANSIENT_REJECT)

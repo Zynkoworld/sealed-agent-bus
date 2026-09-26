@@ -1,17 +1,17 @@
-"""A claim-oldali életjel és a hívói óra ÍRÓ oldala — (2026-09-16 délután) + saját mérés.
+"""The claim-side liveness signal and the WRITING side of the caller clock — (2026-09-16 afternoon) + our own measurement.
 
-Két HIGH az ő köréből, mindkettő mérve és javítva:
+Two HIGH findings from their round, both measured and fixed:
 
-  — `MessageClaim.requeue_dead`: a `pid_of(inst) -> is_alive(None) -> False` lánc a BIZONYÍTÉK
-           HIÁNYÁT „halott"-nak vette, tehát egy ÉLŐ, stabil nevű worker (`claude-alfa-session`) claimjeit
-           bárki kirequeue-olhatta alóla. A naiv javítás (`pid is None -> continue`) viszont a másik végén
-           nyit lyukat: a valóban halott, stabil nevű claimer üzenetei ÖRÖKRE bent ragadnának — ezt ők is
-           megmérték. Ezért HARMADIK ÁLLAPOT, mérhető jelhez kötve: pid -> session-lock -> a claim-könyvtár
-           frissessége (TTL).
-  — a korábbi óra-javítás CSAK az olvasó oldalt korlátozta: a fájlba a NYERS hívói óra került, tehát
-           a hívó órája továbbra is életről döntött, csak mindenki MÁS számára. Múltbeli bélyeg -> KÉT
-           `acquired`; jövőbeli bélyeg + pid nélküli instance -> ÖRÖK zár. Mostantól a `ts_ns` a korlátozott,
-           életről döntő érték, a hívó nyers bélyege pedig `caller_ts_ns` audit-mezőben marad.
+  — `MessageClaim.requeue_dead`: the `pid_of(inst) -> is_alive(None) -> False` chain took the ABSENCE
+           OF EVIDENCE as "dead", so anyone could requeue the claims of a LIVE worker with a stable name (`claude-alfa-session`)
+           out from under it. The naive fix (`pid is None -> continue`), however, opens a hole at the other end:
+           the messages of a truly dead claimer with a stable name would be stuck FOREVER — they measured
+           this too. So a THIRD STATE, bound to a measurable signal: pid -> session lock -> the claim directory's
+           freshness (TTL).
+  — the earlier clock fix bounded ONLY the reading side: the RAW caller clock went into the file, so
+           the caller's clock still decided life, just for EVERYONE ELSE. A past stamp -> TWO
+           `acquired`; a future stamp + a pid-less instance -> an ETERNAL lock. From now on `ts_ns` is the bounded,
+           life-deciding value, and the caller's raw stamp stays in the `caller_ts_ns` audit field.
 
 stdlib unittest.
 """
@@ -41,64 +41,64 @@ class ClaimLiveness(unittest.TestCase):
         self.tmp.cleanup()
 
     def claim(self, instance, *, alive=True, ttl_ns=None):
-        # FONTOS: a valódi `_pid_alive` a None-ra FALSE-t ad — épp ez volt a lelet gyökere. A fixture ezt
-        # utánozza (None -> halott), különben a szonda vakon zöld lenne.
+        # IMPORTANT: the real `_pid_alive` gives FALSE for None — exactly that was the root of the finding. The fixture
+        # imitates this (None -> dead), otherwise the probe would be blindly green.
         return sf.MessageClaim("alfa", instance, bridge=self.bridge,
                                is_alive=lambda pid: (pid is not None) and alive, claim_ttl_ns=ttl_ns)
 
-    # ── ÉLŐ, stabil nevű worker claimjeit nem lehet elvenni ─────────
+    # ── the claims of a LIVE worker with a stable name cannot be taken ─────────
     def test_live_stable_named_worker_keeps_its_claims(self):
         a = self.claim("claude-alfa-session")
-        self.assertEqual(len(a.claim_pending()), 3, "előfeltétel: A megfogta mind a hármat")
+        self.assertEqual(len(a.claim_pending()), 3, "precondition: A grabbed all three")
         b = self.claim("claude-beta-session")
-        self.assertEqual(b.requeue_dead(), [], "egy ÉLŐ, stabil nevű worker claimjeit elvették alóla")
-        self.assertEqual(len(a.claimed_paths()), 3, "A-nál maradnia kell mind a háromnak")
+        self.assertEqual(b.requeue_dead(), [], "the claims of a LIVE worker with a stable name were taken from under it")
+        self.assertEqual(len(a.claimed_paths()), 3, "A must keep all three")
 
-    # ── másik vége: a valóban halott claimer üzenetei visszajönnek ───
+    # ── the other end: the messages of a truly dead claimer come back ───
     def test_stale_stable_named_claimer_is_released(self):
         a = self.claim("halott-worker")
         a.claim_pending()
-        past = time.time() - 7200                              # a claim-könyvtár RÉGI (2 óra)
+        past = time.time() - 7200                              # the claim directory is OLD (2 hours)
         d = os.path.join(self.inbox, ".claimed", "halott-worker")
         for f in os.listdir(d):
             os.utime(os.path.join(d, f), (past, past))
         os.utime(d, (past, past))
         b = self.claim("uj-worker", ttl_ns=3600 * 10 ** 9)
         self.assertEqual(len(b.requeue_dead()), 3,
-                         "a valóban halott, stabil nevű claimer üzenetei örökre bent ragadtak volna")
+                         "the messages of a truly dead claimer with a stable name would have been stuck forever")
 
-    # ── kontroll: pid-alakú név esetén a pid dönt (a régi út) ───────────────
+    # ── control: for a pid-shaped name the pid decides (the old path) ───────────────
     def test_pid_shaped_name_still_uses_the_pid(self):
         a = self.claim("host:%d" % os.getpid())
         a.claim_pending()
         live = self.claim("host:1", alive=True)
-        self.assertEqual(live.requeue_dead(), [], "élő pid: nem nyúlunk hozzá")
+        self.assertEqual(live.requeue_dead(), [], "live pid: we do not touch it")
         dead = self.claim("host:1", alive=False)
-        self.assertEqual(len(dead.requeue_dead()), 3, "halott pid: vissza a sorba")
+        self.assertEqual(len(dead.requeue_dead()), 3, "dead pid: back into the queue")
 
-    # ── az ÍRÓ oldal is korlátozott órát használ ────────────────────
+    # ── the WRITING side also uses a bounded clock ────────────────────
     def test_written_timestamp_is_clamped_and_caller_value_is_kept(self):
         lock = sf.SessionLock("alfa", bridge=self.bridge, is_alive=lambda pid: True)
         st, holder = lock.acquire("ragadt-worker", now_ns=2 ** 62)
         self.assertEqual(st, "acquired")
         self.assertLess(holder["ts_ns"], time.time_ns() + 10 ** 12,
-                        "a jövőbe állított hívói óra bekerült a fájlba -> a zár örökké élne")
-        self.assertEqual(holder.get("caller_ts_ns"), 2 ** 62, "a hívó nyers bélyege auditként megmarad")
+                        "the caller clock set into the future went into the file -> the lock would live forever")
+        self.assertEqual(holder.get("caller_ts_ns"), 2 ** 62, "the caller's raw stamp is kept as audit")
 
     def test_future_written_lock_does_not_become_eternal(self):
         lock = sf.SessionLock("alfa", bridge=self.bridge, is_alive=lambda pid: True)
         lock.acquire("ragadt-worker", now_ns=2 ** 62)
         later = sf.time.time_ns() + lock.ttl_ns + 10 ** 9
         st, _ = sf.SessionLock("alfa", bridge=self.bridge, is_alive=lambda pid: True).acquire("uj", now_ns=later)
-        self.assertEqual(st, "acquired", "a jövőbe írt bélyeget sosem lehetett volna kiöregíteni")
+        self.assertEqual(st, "acquired", "a stamp written into the future could never have been aged out")
 
     def test_past_caller_clock_does_not_yield_two_acquired(self):
         a = sf.SessionLock("alfa", bridge=self.bridge, is_alive=lambda pid: True)
-        st_a, _ = a.acquire("A:2000", now_ns=int(time.time()))   # klasszikus egység-hiba: s a ns helyett
+        st_a, _ = a.acquire("A:2000", now_ns=int(time.time()))   # a classic unit error: s instead of ns
         b = sf.SessionLock("alfa", bridge=self.bridge, is_alive=lambda pid: True)
         st_b, holder = b.acquire("B:2000")
         self.assertFalse(st_a == "acquired" and st_b == "acquired",
-                         "KÉT 'acquired' ugyanarra az identitásra (A=%s, B=%s)" % (st_a, st_b))
+                         "TWO 'acquired' for the same identity (A=%s, B=%s)" % (st_a, st_b))
 
 
 if __name__ == "__main__":

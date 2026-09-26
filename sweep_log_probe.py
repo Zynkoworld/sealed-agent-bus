@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""sweep_log_probe.py — a KÖZJEGYZŐI NAPLÓ mező-söprése állandó őrszemként.
+"""sweep_log_probe.py — a field sweep of the NOTARY LOG as a standing sentinel.
 
-MIÉRT: a capsule2-oldalon a söprés (minden mező törlése / `null` / üres / típus-csere) sorra hozott olyan
-leleteket, amiket kézzel írt szonda nem talált volna; a busz-oldalon ugyanez a módszer két tracebacket mutatott
-ki a `reconcile`-ban (`envelope_sha256` törölve -> `KeyError`, `reason: null` -> `TypeError`). Egy ilyen mérés
-viszont csak addig ér valamit, amíg valaki lefuttatja — ezért ez a fájl a CI-ben fut minden push-ra.
+WHY: on the capsule2 side the sweep (deleting every field / `null` / empty / type swap) repeatedly produced
+findings a hand-written probe would not have found; on the bus side the same method revealed two tracebacks
+in `reconcile` (`envelope_sha256` deleted -> `KeyError`, `reason: null` -> `TypeError`). But such a measurement
+is only worth something as long as someone runs it — so this file runs in CI on every push.
 
-Amit mér: felépít egy VALÓDI kört (posta -> kiadás -> ack) a közjegyzővel és a busz audit-táblájával, majd
-minden bejegyzés-mezőre végigmegy a hamisításokon, és megköveteli, hogy
+What it measures: it builds a REAL round (mail -> delivery -> ack) with the notary and the bus audit table, then
+goes through the forgeries for every entry field, and requires that
 
-  * a hamisítás NE maradjon némán zöld (a hash-lánc vagy az alak-kapu mondja ki), és
-  * SOHA ne legyen traceback — a MÁSIK fél exportja megbízhatatlan bemenet, a traceback nem diagnózis.
+  * a forgery does NOT stay silently green (the hash chain or the shape gate states it), and
+  * there is NEVER a traceback — the OTHER party's export is untrusted input, a traceback is not a diagnosis.
 
-rc=0 zöld · rc=1 néma vagy traceback · rc=2 használati hiba.
+rc=0 green · rc=1 silent or traceback · rc=2 usage error.
 """
 from __future__ import annotations
 
@@ -27,24 +27,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 
-# A KONZISZTENS ÍRÓ modelljében (hamisítás UTÁN újraláncolás) mérten NEM ellenőrzött `cursor` almezők.
-# „ahol a némaság rendben van, ott egy kimondott, nevesített lista mondja ki,
-# hogy az a mező nem ellenőrzött." Ez az a lista. Amelyik almező NINCS benne és mégis néma marad, az LELET.
-# FONTOS, amit a mérés mutatott: ezek a mezők NEM attól kötöttek, hogy bárki olvassa őket, hanem az ALÁÍRÁSTÓL
-# — ugyanez a söprés egy ALÁÍRT ellenőrzőpontot tartalmazó exporton 0 némát ad, mert az író újraláncolhat, de
-# a közjegyző checkpointját nem tudja újra aláírni.
+# In the CONSISTENT WRITER model (re-chaining AFTER the forgery) the `cursor` sub-fields measured as NOT checked.
+# "where silence is fine, a stated, named list must say
+# that the field is not checked." This is that list. A sub-field that is NOT in it and still stays silent is a FINDING.
+# IMPORTANT, what the measurement showed: these fields are NOT bound because anyone reads them, but by the SIGNATURE
+# — the same sweep on an export containing a SIGNED checkpoint gives 0 silent, because the writer can re-chain, but
+# cannot re-sign the notary's checkpoint.
 CURSOR_UNCHECKED = {
-    "at":             "a kurzor állása — a busz audit-sorának from/to párja köti, a kör-bejegyzésé nem",
-    "id":             "a KIADOTT üzenet azonosítója a `delivered` soron — a nyugtákkal vetjük össze, nem magában",
-    "ack":            "a kör ack-célja — az audit-sor `to_id`-ja köti",
-    "from":           "az ack kiinduló kurzora — az audit-sor `from_id`-ja köti",
-    "to":             "az ack cél-kurzora — az audit-sor `to_id`-ja köti",
-    "pending":        "csak a `replies`-hoz VISZONYÍTVA jelent állítást (`_claims_no_skip`)",
-    "replies":        "ugyanaz a viszony a másik oldalról",
-    "next_id":        "az első kiadatlan — csak az ack-célhoz viszonyítva állítás",
-    "round_seq":      "a záró horgony visszamutatása a körre — a SORREND köti, nem az érték",
-    "audit_hash":     "a nyitó horgony hash-e — a `by_seq` összevetés köti, ha az export elér odáig",
-    "audit_end_hash": "a záró horgony hash-e — ugyanaz",
+    "at":             "the cursor position — bound by the bus audit row's from/to pair, not by the round entry's",
+    "id":             "the DELIVERED message's id on the `delivered` row — compared with the receipts, not on its own",
+    "ack":            "the round's ack target — bound by the audit row's `to_id`",
+    "from":           "the ack's starting cursor — bound by the audit row's `from_id`",
+    "to":             "the ack's target cursor — bound by the audit row's `to_id`",
+    "pending":        "only makes a claim RELATIVE to `replies` (`_claims_no_skip`)",
+    "replies":        "the same relation from the other side",
+    "next_id":        "the first undelivered — a claim only relative to the ack target",
+    "round_seq":      "the closing anchor pointing back to the round — bound by ORDER, not by value",
+    "audit_hash":     "the opening anchor's hash — bound by the `by_seq` comparison, if the export reaches that far",
+    "audit_end_hash": "the closing anchor's hash — the same",
 }
 
 
@@ -53,13 +53,13 @@ def _hex(x):
 
 
 def build_round(t, mode="dev"):
-    """Egy valódi kör: 3 üzenet, kiadás, ack — a napló és a busz audit-tábla is megszületik.
+    """A real round: 3 messages, delivery, ack — the log and the bus audit table are both created.
 
-    (2026-09-17): a kör eddig CSAK dev módban épült (a szonda saját env-je), és product módban nem
-    pirosat adott, hanem elszállt (`max()` üres listán: a kikényszerítés az aláíratlan sorokat eldobta) — a CI-ben
-    futó őrszem a TERMÉK-konfigurációt nem mérte, és ezt nem mondta ki. Most a kör MINDKÉT módban felépül: product
-    módban a `hub` feladó a registryben pinelt kulccsal (root, 0600) auto-aláír, tehát a kikényszerítés átengedi.
-    A módok EGY tmp-könyvtárban, külön DB/napló/tár úttal élnek (az `agent_bus.KEYS_DIR` importkor rögzül)."""
+    (2026-09-17): until now the round was built ONLY in dev mode (the probe's own env), and in product mode it did not
+    go red but blew up (`max()` on an empty list: enforcement dropped the unsigned rows) — the sentinel running
+    in CI did not measure the PRODUCT configuration, and did not say so. Now the round is built in BOTH modes: in product
+    mode the `hub` sender auto-signs with the key pinned in the registry (root, 0600), so enforcement lets it through.
+    The modes live in ONE tmp directory, with separate DB/log/store paths (`agent_bus.KEYS_DIR` is fixed at import)."""
     keys = os.path.join(t, "keys")
     os.environ.update({"AGENT_BUS_DB": os.path.join(t, "bus_%s.db" % mode), "AGENT_BRIDGE_DIR": t,
                        "AGENT_BUS_DIR": t, "AGENT_BUS_MODE": mode, "AGENT_BRIDGE_INBOX": os.path.join(t, "inbox"),
@@ -70,7 +70,7 @@ def build_round(t, mode="dev"):
     import bus_ssh_exchange as ex
     db, log = os.environ["AGENT_BUS_DB"], os.path.join(t, "n_%s.jsonl" % mode)
     if mode == "product":
-        # a `hub` pinelt kulcsa: registry pub + guard-olt seed (root-tulajdon, 0600, a könyvtár nem csoport/világ-írható)
+        # `hub`'s pinned key: registry pub + guarded seed (root-owned, 0600, the directory not group/world-writable)
         os.makedirs(keys, mode=0o700, exist_ok=True)
         os.chmod(keys, 0o700)
         hseed, hpub = bn.keypair()
@@ -81,37 +81,37 @@ def build_round(t, mode="dev"):
             f.write(_hex(hseed))
         os.chmod(kp, 0o600)
     seed, _pub = bn.keypair()
-    # SŰRŰ checkpoint: a korábbi `checkpoint_every=50` mellett a 3 üzenetes körbe EGYETLEN checkpoint sem
-    # került, tehát a söprés az ALÁÍRT sort meg sem látta. A saját őrszemem vakfoltja volt (2026-09-16).
+    # DENSE checkpoints: with the earlier `checkpoint_every=50`, NOT A SINGLE checkpoint got into the 3-message round,
+    # so the sweep never even saw the SIGNED row. It was my own sentinel's blind spot (2026-09-16).
     notary = bn.Notary(log, seed=seed, checkpoint_every=2, db=db)
     for i in range(3):
         ab.send("hub", "remote1", "ki-%d" % i, db=db, mirror=False)
     r1 = ex.exchange("remote1", json.dumps({}), db=db, attach_root=os.path.join(t, "att"), notary=notary)
     if mode == "product":
-        # a product-kör CSAK akkor mér product-ot, ha a kikényszerítés tényleg élt ÉS a válaszok aláírva jöttek át —
-        # különben a „zöld" egy dev-kör lenne product címkével (pont a hibaosztálya, egy réteggel beljebb)
+        # the product round measures product ONLY if enforcement was really live AND the replies came through signed —
+        # otherwise the "green" would be a dev round with a product label (exactly its error class, one layer deeper)
         import bus_enforce as enf
         if enf.mode(db=db) != "product":
-            raise RuntimeError("a product-kör nem product módban futott (mode=%r)" % enf.mode(db=db))
-        # a válasz-vetület (_REPLY_KEYS) nem hordoz sig-et — a BUSZ sorait mérjük, nem a vetületet
+            raise RuntimeError("the product round did not run in product mode (mode=%r)" % enf.mode(db=db))
+        # the reply projection (_REPLY_KEYS) carries no sig — we measure the BUS rows, not the projection
         rows_p = ab.recv("remote1", mark=False, db=db)
         auth = [ab.verify_sender(r) for r in rows_p]
         if not r1["replies"] or not rows_p or any(a != "signed" for a in auth):
-            raise RuntimeError("a product-kör sorai nem 'signed' (replies=%d, auth=%s) — a kikényszerítés nem mérhető"
+            raise RuntimeError("the product round's rows are not 'signed' (replies=%d, auth=%s) — enforcement cannot be measured"
                                % (len(r1["replies"]), auth))
     top = max(m["id"] for m in r1["replies"])
     ex.exchange("remote1", json.dumps({"ack": top}), db=db, attach_root=os.path.join(t, "att"), notary=notary)
     if mode == "product":
-        # a valódi oka: az exchange PROCESS-GLOBÁLISAN kapcsolta ki az auto-signt — egy KÉSŐBBI küldés ugyanabban a
-        # folyamatban aláíratlan maradt. Ezért egy exchange UTÁNI küldésnek is 'signed'-nek kell lennie (mutáns-érzékeny).
+        # the real cause: the exchange disabled auto-sign PROCESS-GLOBALLY — a LATER send in the same
+        # process stayed unsigned. So a send AFTER the exchange must also be 'signed' (mutant-sensitive).
         ab.send("hub", "remote1", "post-exchange", db=db, mirror=False)
         after = ab.recv("remote1", mark=False, db=db)
         if not after:
-            raise RuntimeError("az exchange UTÁNI küldést a termék-mód ELDOBTA (aláíratlan) — az exchange folyamat-"
-                               "állapotot rontott (AGENT_BUS_AUTO_SIGN globálisan kikapcsolva)")
+            raise RuntimeError("product mode DROPPED the send AFTER the exchange (unsigned) — the exchange corrupted process "
+                               "state (AGENT_BUS_AUTO_SIGN disabled globally)")
         last = after[-1]
         if ab.verify_sender(last) != "signed":
-            raise RuntimeError("egy exchange UTÁNI küldés nem 'signed' (%s) — az exchange folyamat-állapotot rontott"
+            raise RuntimeError("a send AFTER the exchange is not 'signed' (%s) — the exchange corrupted process state"
                                % ab.verify_sender(last))
     exp = bn.export(log, 1)
     c = ab._conn(db)
@@ -127,7 +127,7 @@ def build_round(t, mode="dev"):
 
 
 def sweep(t, probe_mode) -> int:
-    """A teljes söprés EGY módban (dev | product). rc=0 zöld, rc=1 néma/traceback."""
+    """The full sweep in ONE mode (dev | product). rc=0 green, rc=1 silent/traceback."""
     with contextlib.nullcontext():
         bn, exp, rows, receipts = build_round(t, probe_mode)
 
@@ -140,21 +140,21 @@ def sweep(t, probe_mode) -> int:
                 return "CRASH:%s" % e.__class__.__name__
 
         if run(exp) is not True:
-            print("sweep_log_probe: az ÉRINTETLEN export nem zöld — a szonda nem tud mérni")
+            print("sweep_log_probe: the UNTOUCHED export is not green — the probe cannot measure")
             return 1
-        # MINDEN sortípus, nem csak az `entry`: a `checkpoint` hordozza a közjegyző ALÁÍRÁSÁT, és eddig
-        # semmilyen alak-kapu nem futott rá. A söprés ezért típusonként megy végig a mezőkön.
+        # EVERY row type, not only `entry`: the `checkpoint` carries the notary's SIGNATURE, and until now
+        # no shape gate at all ran on it. So the sweep goes through the fields per type.
         keys_by_type = {}
         for e in exp:
             ty = e.get("type")
             if ty:
                 keys_by_type.setdefault(ty, set()).update(e)
         if "checkpoint" not in keys_by_type:
-            print("sweep_log_probe: a korpuszban NINCS checkpoint sor — a szonda az aláírt sort nem méri")
+            print("sweep_log_probe: the corpus has NO checkpoint row — the probe does not measure the signed row")
             return 1
-        # a `claimed_ts_ms` a legtöbb bejegyzésen VALÓBAN None: a `null` ott nem változtat semmit
-        noop = {("entry", "claimed_ts_ms", "null"),   # (sortípus, mező, MÓD) — a lista-érték nem lehet kulcs
-                ("entry", "type", "str"), ("checkpoint", "type", "str")}   # a `type` átírása MÁS sortípus
+        # `claimed_ts_ms` REALLY is None on most entries: `null` changes nothing there
+        noop = {("entry", "claimed_ts_ms", "null"),   # (row type, field, MODE) — a list value cannot be a key
+                ("entry", "type", "str"), ("checkpoint", "type", "str")}   # rewriting `type` is ANOTHER row type
         silent, crashed, n = [], [], 0
         for ty in sorted(keys_by_type):
           for k in sorted(keys_by_type[ty]):
@@ -179,14 +179,14 @@ def sweep(t, probe_mode) -> int:
                     crashed.append((ty, k, mode, res))
         print("sweep_log_probe: %d tamper | silent=%d crash=%d" % (n, len(silent), len(crashed)))
         for ty, k, mode, c in silent[:10]:
-            print("  - SILENT: %s.%s mode=%s (%d sor) — the report stayed green" % (ty, k, mode, c))
+            print("  - SILENT: %s.%s mode=%s (%d rows) — the report stayed green" % (ty, k, mode, c))
         for ty, k, mode, e in crashed[:10]:
             print("  - CRASH:  %s.%s mode=%s -> %s — a traceback is not a diagnosis" % (ty, k, mode, e))
         if silent or crashed:
             return 1
-        # ── 2. fázis: a `cursor` ALMEZŐI, a KONZISZTENS ÍRÓ modelljében ────────────────────────────────
-        # MEDIUM (a)+(b): a fenti söprés a bejegyzés TOP-LEVEL mezőire megy, és a
-        # diagnózist sokszor a hash-guard adja — aki viszont a naplót ÍRJA, a láncot is maga számolja.
+        # ── phase 2: the `cursor` SUB-FIELDS, in the CONSISTENT WRITER model ─────────────────────────────
+        # MEDIUM (a)+(b): the sweep above goes over the entry's TOP-LEVEL fields, and the
+        # diagnosis is often given by the hash guard — but whoever WRITES the log also computes the chain.
         import bus_notary as _bn
 
         def _rechain(ents):
@@ -205,19 +205,19 @@ def sweep(t, probe_mode) -> int:
         for e in exp:
             if e.get("type") == "entry" and isinstance(e.get("cursor"), dict):
                 subs |= set(e["cursor"])
-        # KÉT szeletet mérünk, mert a különbségük MAGA a lelet:
-        #   (a) TELJES export — van benne ALÁÍRT ellenőrzőpont: az író újraláncolhat, de újra ALÁÍRNI nem tud;
-        #   (b) ALÁÍRÁS NÉLKÜLI szelet (a checkpoint sorokat kivéve) — ez az egyik kar korpusza, és itt látszik,
-        #       mi az, amit VALÓBAN olvas valaki, és mi az, ami csak az aláírástól volt kötve.
-        # Ha csak (a)-t mérnénk, a kimondott lista sosem szólalna meg — épp a veszélyes esetet hagynánk ki.
-        slices = [("aláírt ellenőrzőponttal", list(exp)),
-                  ("ALÁÍRÁS NÉLKÜLI szelet", [e for e in exp if e.get("type") != "checkpoint"])]
+        # We measure TWO slices, because their difference IS the finding:
+        #   (a) the FULL export — it contains a SIGNED checkpoint: the writer can re-chain, but cannot re-SIGN;
+        #   (b) a slice WITHOUT A SIGNATURE (checkpoint rows removed) — this is one arm's corpus, and here it shows
+        #       what someone ACTUALLY reads, and what was bound only by the signature.
+        # If we measured only (a), the stated list would never speak up — we would skip exactly the dangerous case.
+        slices = [("with a signed checkpoint", list(exp)),
+                  ("UNSIGNED slice", [e for e in exp if e.get("type") != "checkpoint"])]
         for _label, _base in slices:
           if run(_rechain(copy.deepcopy(_base))) is not True:
-            print("sweep_log_probe: az ÚJRALÁNCOLT, érintetlen %s nem zöld — a 2. fázis nem tud mérni" % _label)
+            print("sweep_log_probe: the RE-CHAINED, untouched %s is not green — phase 2 cannot measure" % _label)
             return 1
         c_silent, c_crash, c_n = [], [], 0
-        _base = slices[1][1]                     # a mérés az ALÁÍRÁS NÉLKÜLI szeleten dönt (a szigorúbb eset)
+        _base = slices[1][1]                     # the measurement decides on the UNSIGNED slice (the stricter case)
         for k in sorted(subs):
             for mode, val in (("delete", None), ("null", None), ("zero", 0), ("str", "X"), ("empty", [])):
                 ents, touched = copy.deepcopy(_base), 0
@@ -240,7 +240,7 @@ def sweep(t, probe_mode) -> int:
                 elif isinstance(res, str):
                     c_crash.append((k, mode, res))
         undeclared = sorted({k for k, _ in c_silent} - set(CURSOR_UNCHECKED))
-        # …és ugyanez a söprés az ALÁÍRT szeleten: itt 0 némát várunk, mert a checkpointot nem lehet újra aláírni
+        # …and the same sweep on the SIGNED slice: here we expect 0 silent, because the checkpoint cannot be re-signed
         s_silent, s_n = [], 0
         for k in sorted(subs):
             for mode, val in (("delete", None), ("null", None), ("zero", 0), ("str", "X"), ("empty", [])):
@@ -260,23 +260,23 @@ def sweep(t, probe_mode) -> int:
                 s_n += 1
                 if run(_rechain(ents)) is True:
                     s_silent.append((k, mode))
-        print("sweep_log_probe/cursor (konzisztens író):")
-        print("   ALÁÍRT ellenőrzőponttal:  %d hamisítás | néma=%d   <- a fedezet az ALÁÍRÁS, nem az ellenőrzés"
+        print("sweep_log_probe/cursor (consistent writer):")
+        print("   with a SIGNED checkpoint: %d forgeries | silent=%d   <- the backing is the SIGNATURE, not the check"
               % (s_n, len(s_silent)))
-        print("   ALÁÍRÁS NÉLKÜLI szeleten: %d hamisítás | néma=%d (%d mező) crash=%d"
+        print("   on the UNSIGNED slice:    %d forgeries | silent=%d (%d fields) crash=%d"
               % (c_n, len(c_silent), len({k for k, _ in c_silent}), len(c_crash)))
         if s_silent:
             for k, mode in s_silent[:8]:
-                print("  - SILENT: cursor.%s mode=%s ALÁÍRT szeleten — az aláírás sem köti" % (k, mode))
+                print("  - SILENT: cursor.%s mode=%s on the SIGNED slice — not even the signature binds it" % (k, mode))
             return 1
         for k, mode, e in c_crash[:8]:
             print("  - CRASH:  cursor.%s mode=%s -> %s — a traceback is not a diagnosis" % (k, mode, e))
         for k in undeclared:
-            print("  - SILENT: cursor.%s — NINCS a kimondott (nem ellenőrzött) listán" % k)
+            print("  - SILENT: cursor.%s — NOT on the stated (unchecked) list" % k)
         if undeclared or c_crash:
             return 1
         for k in sorted({k for k, _ in c_silent}):
-            print("      nem ellenőrzött (kimondva): cursor.%-16s %s" % (k, CURSOR_UNCHECKED[k]))
+            print("      unchecked (stated): cursor.%-16s %s" % (k, CURSOR_UNCHECKED[k]))
         print("PASS (mode=%s) — no notary entry field can be dropped or mistyped without a diagnosis, and every "
               "silent cursor sub-field is DECLARED as unchecked (not hidden)." % probe_mode)
         return 0
@@ -286,16 +286,16 @@ MODES = ("dev", "product")
 
 
 def main(argv=None) -> int:
-    """a verdikt csak a MÉRT módokra áll. Mindkét mód fut; ha egy kör fel sem épül, az PIROS és kimondott
-    (nem traceback, nem csendes 'csak dev'). Az 'ALL PASS' csak akkor, ha dev ÉS product is zöld."""
+    """the verdict holds only for the MEASURED modes. Both modes run; if a round is not even built, that is RED and stated
+    (not a traceback, not a silent 'dev only'). 'ALL PASS' only if both dev AND product are green."""
     rc = 0
     with tempfile.TemporaryDirectory() as t:
         for mode in MODES:
             print("=== sweep_log_probe: mode=%s ===" % mode)
             try:
                 r = sweep(t, mode)
-            except Exception as e:                      # a kör felépülése maga is mérés: a bukása lelet, nem traceback
-                print("sweep_log_probe: a(z) %s módú kör NEM ÉPÜLT FEL (%s: %s) — a verdikt ezt a módot NEM fedi"
+            except Exception as e:                      # building the round is itself a measurement: its failure is a finding, not a traceback
+                print("sweep_log_probe: the %s-mode round was NOT BUILT (%s: %s) — the verdict does NOT cover this mode"
                       % (mode, e.__class__.__name__, e))
                 r = 1
             rc = max(rc, r)

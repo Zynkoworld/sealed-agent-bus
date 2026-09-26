@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""agent_duty — ÜGYELET: a munkasor aktív agentje tényleg dolgozik-e (AgentBus v1.3).
+"""agent_duty — DUTY: is the work queue's active agent really working (AgentBus v1.3).
 
-A flotta szabálya: egyszerre EGY agent dolgozik, a többi sleep-safe-ben pihen; az operátor (vagy a felügyelő agent)
-ébreszti a következőt, miután ellenőrizte az előző jelentését. A gyakorlatban kiderült, hogy ez csendben megakadhat:
-az ébresztő szövege a tmux-promptban ragadt (az Enter elveszett), és órákig „mindenki aludt". Ez a modul ezt fogja meg.
+The fleet's rule: ONE agent works at a time, the others rest in sleep-safe; the operator (or the supervisor agent)
+wakes the next one after checking the previous one's report. In practice it turned out this can stall silently:
+the wake-up text got stuck in the tmux prompt (the Enter was lost), and for hours "everyone slept". This module catches that.
 
-Bemenet: egy aktív-kijelölés JSON ({"active": <agent>, "topic": <feladat>, "since": <epoch>}), amit az ébresztő ír.
-Döntés (tiszta függvény, `decide`), soronként egy akció:
-  none        dolgozik / jóváhagyásra vár / jogosan alszik / még nem telt le az idő
-  enter       a SAJÁT ébresztő-szövegünk ragadt a promptban (előtag-egyezés) → egy Enter; más szöveg SZENT, ahhoz nem nyúlunk
-  nudge       tétlen, üres prompt ≥ IDLE_NUDGE perc → egy fix szövegű bökés (agent_wake.safe_send: szent gépelés, nincs C-u)
-  done        tétlen ÉS az ébresztés óta jelentett → szól a felügyelőnek, hogy léptesse a sort (nem bökdösi a kész agentet)
-  alert       a bökés után ≥ DUTY_ALERT perc sem indult, vagy nincs panel → riasztás (óránként legfeljebb egy)
-A sort NEM lépteti magától: a jelentést ember/felügyelő ellenőrzi (label ≤ proof).
-Alvás: agent_wake.is_asleep (globális vagy agentenkénti marker) → none.
+Input: an active-assignment JSON ({"active": <agent>, "topic": <task>, "since": <epoch>}), written by the waker.
+Decision (a pure function, `decide`), one action per row:
+  none        working / awaiting approval / legitimately asleep / the time has not elapsed yet
+  enter       OUR OWN wake-up text got stuck in the prompt (prefix match) → one Enter; other text is SACRED, we do not touch it
+  nudge       idle, empty prompt ≥ IDLE_NUDGE minutes → one fixed-text poke (agent_wake.safe_send: sacred typing, no C-u)
+  done        idle AND has reported since the wake-up → tells the supervisor to advance the queue (does not keep poking a finished agent)
+  alert       still not started ≥ DUTY_ALERT minutes after the poke, or no pane → alert (at most one per hour)
+It does NOT advance the queue by itself: a human/the supervisor checks the report (label ≤ proof).
+Sleep: agent_wake.is_asleep (global or per-agent marker) → none.
 
-Konfiguráció (env): AGENT_DUTY_ACTIVE (JSON-út), AGENT_DUTY_STATE, AGENT_DUTY_OWN_PREFIX (az ébresztő-szöveg eleje),
+Configuration (env): AGENT_DUTY_ACTIVE (JSON path), AGENT_DUTY_STATE, AGENT_DUTY_OWN_PREFIX (the start of the wake-up text),
 AGENT_DUTY_IDLE_NUDGE_MIN (10), AGENT_DUTY_ALERT_MIN (20), AGENT_DUTY_REMIND_S (3600),
-AGENT_DUTY_NOTIFY (értesítő modul:függvény, pl. Telegram — alapból csak busz-üzenet a felügyelőnek),
-AGENT_DUTY_SUPERVISOR (a felügyelő busz-identitása, alap: operator).
+AGENT_DUTY_NOTIFY (notifier module:function, e.g. Telegram — by default only a bus message to the supervisor),
+AGENT_DUTY_SUPERVISOR (the supervisor's bus identity, default: operator).
 """
 from __future__ import annotations
 
@@ -34,14 +34,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent_wake as aw  # noqa: E402
 
 _ANSI = re.compile("\x1b\\[[0-9;]*[A-Za-z]")
-# v1.4: a státuszsorban látszó futó háttér-shell ("· 5 shells ·") = az agent egy mérésre vár → dolgozik, NEM bökjük
-# (a flottában 09-14-én kétszer bökött meg így egy háttérmérésre váró agentet).
+# v1.4: a running background shell visible on the status line ("· 5 shells ·") = the agent is waiting for a measurement → working, we do NOT poke
+# (on 09-14 the fleet twice poked an agent waiting for a background measurement this way).
 SHELLS = re.compile(r"·\s*0*[1-9]\d* shells?\s*(?:·|$)", re.I)
 
 
 def _bg_shells(pane):
-    """CSAK a legalsó `⏵⏵` státuszsor számít (egy kiírt busz-üzenet szövege nem némíthatja el
-    az ügyeletet), és legalább 1 shell kell (a „0 shells" nem munka)."""
+    """ONLY the bottom `⏵⏵` status line counts (the text of a printed bus message cannot silence
+    duty), and at least 1 shell is required ("0 shells" is not work)."""
     for ln in reversed(_ANSI.sub("", pane).splitlines()[-4:]):
         if "⏵⏵" in ln:
             return bool(SHELLS.search(ln))
@@ -57,7 +57,7 @@ def _envf(name, default):
 
 
 def prompt_text(pane):
-    """Az utolsó prompt-sor szövege (ANSI nélkül, a prompt-jel után)."""
+    """The text of the last prompt line (without ANSI, after the prompt character)."""
     pc = aw._prompt_char()
     last = None
     for ln in (pane or "").splitlines():
@@ -69,24 +69,24 @@ def prompt_text(pane):
 
 def decide(state, *, now, pane, asleep, reported, own_prefix,
            idle_nudge_min=10.0, alert_min=20.0, remind_s=3600.0, busy_stuck_min=60.0, waiting_stuck_min=60.0):
-    """→ (akció, új_állapot). Mellékhatás nélküli; minden időt a hívó ad.
-    `waiting_stuck_min`: a jóváhagyás-minta ugyanúgy önbevallott állapot, mint a „dolgozik" — ha a panel
-    a mintával együtt ennyi percig BÁJTRA változatlan, az beragadás (a kérdés a promptban ragadt), nem várakozás."""
+    """→ (action, new_state). Side-effect free; the caller supplies all times.
+    `waiting_stuck_min`: the approval pattern is just as much a self-reported state as "working" — if the pane
+    stays BYTE-identical together with the pattern for this many minutes, it is stuck (the question stuck in the prompt), not waiting."""
     st = dict(state or {})
     if asleep:
         return "none", st
     if pane is None:
         st["no_pane_since"] = st.get("no_pane_since") or now
-        # Saját egyetlen `alerted` kulcs MINDEN riasztás-típusra -> az első riasztás
-        # `remind_s`-ig elnyomta a MÁSIKAT is (pl. a no-pane elnyomta a beragadt-busy riasztást). Típusonként.
+        # a single `alerted` key for EVERY alert type -> the first alert
+        # suppressed the OTHER one too until `remind_s` (e.g. no-pane suppressed the stuck-busy alert). Per type.
         if now - st["no_pane_since"] >= alert_min * 60 and now - st.get("alerted_no_pane", 0) >= remind_s:
             st["alerted_no_pane"] = now
             return "alert", st
         return "none", st
     st.pop("no_pane_since", None)
     if aw.is_busy(pane) or _bg_shells(pane):
-        # a „dolgozik" szövegminta önmagában nem bizonyíték — egy lefagyott panel utolsó képkockáján
-        # is ott lehet. Ha a panel tartalma busy_stuck_min percig BÁJTRA változatlan, az beragadás, nem munka.
+        # the "working" text pattern alone is not evidence — it may be on the last frame of a frozen
+        # pane. If the pane's content stays BYTE-identical for busy_stuck_min minutes, it is stuck, not working.
         h = hashlib.sha256(_ANSI.sub("", pane).encode("utf-8", "replace")).hexdigest()
         if st.get("busy_hash") != h:
             st.update(busy_hash=h, busy_same_since=now)
@@ -99,10 +99,10 @@ def decide(state, *, now, pane, asleep, reported, own_prefix,
         return "none", st
     st.pop("busy_hash", None); st.pop("busy_same_since", None)
     if WAITING.search("\n".join(_ANSI.sub("", pane).splitlines()[-40:])):
-        # (2026-09-17): a busy-ágon MÁR javított hibaosztály itt javítatlan volt — a jóváhagyás-minta feltétel
-        # nélkül `none`-t adott (óra, számláló, hash nélkül), miközben a jóváhagyásra-várás ÉPP az az állapot, amiben egy
-        # agent órákig áll, és a minta a panel SAJÁT kimenetéből olvas (egy kiírt README/help is elnémította az ügyeletet).
-        # Ugyanaz a recept, mint a busy-ágon: a mintával együtt bájtra változatlan panel egy küszöb fölött = beragadás.
+        # (2026-09-17): an error class ALREADY fixed on the busy branch was unfixed here — the approval pattern unconditionally
+        # gave `none` (no clock, counter, hash), while waiting for approval is EXACTLY the state an
+        # agent sits in for hours, and the pattern reads from the pane's OWN output (a printed README/help also silenced duty).
+        # The same recipe as on the busy branch: a pane byte-identical together with the pattern above a threshold = stuck.
         h = hashlib.sha256(_ANSI.sub("", pane).encode("utf-8", "replace")).hexdigest()
         if st.get("waiting_hash") != h:
             st.update(waiting_hash=h, waiting_same_since=now)
@@ -119,7 +119,7 @@ def decide(state, *, now, pane, asleep, reported, own_prefix,
         if own_prefix and text.startswith(own_prefix) and now - st.get("enter_sent", 0) >= 240:
             st["enter_sent"] = now
             return "enter", st
-        return "none", st                                   # más szöveg a promptban: szent
+        return "none", st                                   # other text in the prompt: sacred
     st["idle_since"] = st.get("idle_since") or now
     idle_min = (now - st["idle_since"]) / 60
     if reported and idle_min >= 5:
@@ -145,7 +145,7 @@ def _load(path, default):
 
 
 def _load_active(path):
-    """→ (dict|None, ok). a hiányzó/sérült kijelölés NEM azonos a „minden rendben"-nel."""
+    """→ (dict|None, ok). A missing/damaged assignment is NOT the same as "all fine"."""
     try:
         with open(path) as f:
             d = json.load(f)
@@ -159,8 +159,8 @@ def _load_active(path):
 
 
 def count_reports_inbox(agent, since, *, bridge=None, supervisor=None):
-    """Alapértelmezett `count_reports`: a felügyelő JSON-tükör inboxában az ébresztés óta
-    érkezett `<agent>_*.json` fájlok száma. A gépi őr-üzenetek szűrése a hívó dolga (AGENT_DUTY_REPORT_EXCLUDE regex)."""
+    """The default `count_reports`: the number of `<agent>_*.json` files that arrived in the supervisor's JSON mirror inbox
+    since the wake-up. Filtering machine guard messages is the caller's job (AGENT_DUTY_REPORT_EXCLUDE regex)."""
     import re as _re
     bridge = bridge or os.environ.get("AGENT_BRIDGE_DIR", os.path.expanduser("~/.agentbus"))
     supervisor = supervisor or os.environ.get("AGENT_DUTY_SUPERVISOR", "operator")
@@ -178,21 +178,21 @@ def count_reports_inbox(agent, since, *, bridge=None, supervisor=None):
             continue
         try:
             fp = os.path.join(d, f)
-            # Saját eddig egy ÜRES, megfelelő nevű fájl `touch`-olása is „jelentés" volt, és a
-            # felügyelői üzenet ebből lett „jelentett és tétlen — jöhet a következő". A jelentés legalább
-            # PARSE-olható JSON legyen, valódi tartalommal — ez nem bizonyíték, de a 0 bájtos fájlt kizárja.
+            # until now `touch`ing an EMPTY file with a matching name also counted as a "report", and the
+            # supervisor message turned it into "reported and idle — the next one may go". A report must at least be
+            # PARSEABLE JSON with real content — this is not proof, but it rules out a 0-byte file.
             if os.path.getsize(fp) < 2:
                 continue
             with open(fp, encoding="utf-8") as _fh:
                 _d = json.load(_fh)
-            # SZERKEZETI szabály (nem tartalmi): a jelentés a busz JSON-tükrének egy sora legyen, amit AZ AGENT
-            # küldött — egy `echo {} >` fájl nem az. Tartalmat nem minősítünk; ez nem bizonyíték, csak a
-            # „jelentés = fájlnév" egyenlet megszüntetése.
+            # A STRUCTURAL rule (not a content one): the report must be a row of the bus JSON mirror sent BY THE AGENT
+            # — an `echo {} >` file is not. We do not rate content; this is not proof, just removing the
+            # "report = file name" equation.
             if not isinstance(_d, dict) or str(_d.get("from") or "").strip() != agent:
                 continue
             if os.path.getmtime(fp) > since:
                 n += 1
-        except (OSError, ValueError):            # nem olvasható VAGY nem értelmezhető JSON -> nem jelentés
+        except (OSError, ValueError):            # unreadable OR unparseable JSON -> not a report
             continue
     return n
 
@@ -203,23 +203,23 @@ def _notify(text):
         mod, fn = spec.split(":", 1)
         try:
             getattr(importlib.import_module(mod), fn)(text)
-        except Exception as e:                                 # a riasztás ELVESZETT — ez nem lehet néma
-            sys.stderr.write("AGENT_DUTY_NOTIFY (%s) hibára futott (%s): a riasztás NEM ment ki: %s\n"
+        except Exception as e:                                 # the alert was LOST — this cannot be silent
+            sys.stderr.write("AGENT_DUTY_NOTIFY (%s) failed (%s): the alert did NOT go out: %s\n"
                              % (spec, e.__class__.__name__, text[:120]))
 
 
 def run_once(*, now=None, run=None, bus_send=None, count_reports=None, mono=None):
-    if now is None:                                        # éles futás: fali és monoton óra együtt
+    if now is None:                                        # a live run: wall and monotonic clock together
         now, mono = time.time(), (mono if mono is not None else time.monotonic())
     base = aw.state_dir()
     state_path = os.environ.get("AGENT_DUTY_STATE", os.path.join(base, "duty_state.json"))
     sup = os.environ.get("AGENT_DUTY_SUPERVISOR", "operator")
     active, why = _load_active(os.environ.get("AGENT_DUTY_ACTIVE", os.path.join(base, "duty_active.json")))
     if active is None:
-        # nem mérhető, ki az ügyeletes → saját státusz + riasztás (óránként legfeljebb egy)
+        # it cannot be measured who is on duty → its own status + alert (at most one per hour)
         gst = _load(state_path, {})
         if now - gst.get("unknown_alerted", 0) >= _envf("AGENT_DUTY_REMIND_S", 3600):
-            msg = "ÜGYELET: nem mérhető, ki az ügyeletes (a kijelölés %s) — senki nem figyeli a munkát." % why
+            msg = "DUTY: it cannot be measured who is on duty (the assignment %s) — no one is watching the work." % why
             if bus_send:
                 bus_send(sup, msg)
             _notify(msg)
@@ -228,12 +228,12 @@ def run_once(*, now=None, run=None, bus_send=None, count_reports=None, mono=None
         return "unknown"
     agent, topic = active.get("active"), active.get("topic", "")
     if not agent:
-        return "no-duty"                                    # szándékosan nincs ügyeletes (pl. a flotta pihen) — kimondva
+        return "no-duty"                                    # deliberately no one on duty (e.g. the fleet is resting) — stated
     st = _load(state_path, {})
     if st.get("agent") != agent or st.get("topic") != topic:
         st = {"agent": agent, "topic": topic}
-    # fali-óra ugrás ellen a monoton órával vetjük össze az eltelt időt; ugrásnál a tárolt
-    # időbélyegeket eltoljuk, hogy az eltelt idő megmaradjon (se késleltetés, se hamis riasztás).
+    # against wall-clock jumps we compare the elapsed time with the monotonic clock; on a jump the stored
+    # timestamps are shifted, so the elapsed time is preserved (neither delay nor a false alert).
     lw, lm = st.get("last_wall"), st.get("last_mono")
     if mono is not None and isinstance(lw, (int, float)) and isinstance(lm, (int, float)) and mono >= lm:
         drift = now - (lw + (mono - lm))
@@ -255,14 +255,14 @@ def run_once(*, now=None, run=None, bus_send=None, count_reports=None, mono=None
     if action == "enter":
         runner(["tmux", "send-keys", "-t", agent, "Enter"])
     elif action == "nudge":
-        aw.safe_send(agent, agent, f"{own} ügyelet: te vagy az aktív agent ({topic}). Nézd meg a buszod és folytasd; ha kész, jelents.", run=run)
+        aw.safe_send(agent, agent, f"{own} duty: you are the active agent ({topic}). Check your bus and continue; report when done.", run=run)
     elif action in ("done", "alert"):
         if action == "done":
-            msg = f"ÜGYELET: {agent} ({topic}) jelentett és tétlen — jöhet a következő (ellenőrzés után)."
+            msg = f"DUTY: {agent} ({topic}) has reported and is idle — the next one may go (after checking)."
         elif st.get("stuck_busy"):
-            msg = f"ÜGYELET: {agent} ({topic}) „dolgozik”-nak látszik, de a panel órák óta változatlan — beragadt?"
+            msg = f"DUTY: {agent} ({topic}) looks \"working\", but the pane has been unchanged for hours — stuck?"
         else:
-            msg = f"ÜGYELET: senki nem dolgozik — {agent} ({topic}) tétlen / nincs panel, bökés után sem indult."
+            msg = f"DUTY: no one is working — {agent} ({topic}) idle / no pane, did not start even after the poke."
         if bus_send:
             bus_send(sup, msg)
         if action == "alert":
@@ -284,7 +284,7 @@ def _main():
         agent_bus.send("ugyelet", to, msg, topic="UGYELET", kind="alert")
     res = run_once(bus_send=_bus_send, count_reports=count_reports_inbox)
     print(res)
-    return 2 if res == "unknown" else 0          # a „nem mérhető" nem lehet rc=0
+    return 2 if res == "unknown" else 0          # "not measurable" cannot be rc=0
 
 
 if __name__ == "__main__":

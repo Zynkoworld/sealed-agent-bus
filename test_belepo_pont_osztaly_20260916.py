@@ -1,23 +1,23 @@
-"""AZ OSZTÁLY őrszeme: MINDEN CLI al-parancs, ami fájlt vesz.
+"""The CLASS sentinel: EVERY CLI sub-command that takes a file.
 
-Ez a szonda HÁROMSZOR volt vak, és mindháromszor másképp — a történetet itt hagyom, mert a tanulság a
-szondáról szól, nem a kódról:
+This probe was blind THREE times, and differently each time — I leave the story here, because the lesson is about the
+probe, not the code:
 
-  1. az al-parancsokat az `--help` SZÖVEG sorainak elejéről kereste; az argparse behúzva, `{a,b,c}` alakban
-     írja ki őket -> egyetlen al-parancsot sem hívott meg;
-  2. javítva: a parserből vette az al-parancsokat — de `[modul, al-parancs, fájl]` alakban hívott, a KÖTELEZŐ
-     kapcsolók nélkül, így 23-ból 22 **argparse-hibán** (rc=2) állt meg, amit „rendben"-nek olvasott.
-     Ténylegesen EGYETLEN al-parancsot mért: a `bus_notary verify`-t — azt, amelyik már javítva volt.
-     (NIT mérte ki; a MEDIUM lelete — `reconcile` üres naplóra rc=0 — épp a vak
-     halmazban ült.)
-  3. a bemeneti alakokból hiányzott az, ami a HIGH-t adja: az ÉRVÉNYES JSON-OBJEKTUM, ami nem bejegyzés.
+  1. it looked for the sub-commands at the start of the lines of the `--help` TEXT; argparse prints them indented, in the
+     `{a,b,c}` shape -> it did not call a single sub-command;
+  2. fixed: it took the sub-commands from the parser — but it called them as `[module, sub-command, file]`, without the REQUIRED
+     switches, so 22 of 23 stopped at an **argparse error** (rc=2), which it read as "fine".
+     It actually measured ONE sub-command: `bus_notary verify` — the one that was already fixed.
+     (A NIT measured this; the MEDIUM finding — `reconcile` on an empty log gives rc=0 — sat exactly in the blind
+     set.)
+  3. the input shapes lacked the one that gives the HIGH finding, a VALID JSON OBJECT that is not an entry.
 
-Ezért a szonda mostantól a KÖTELEZŐ ARGUMENTUMOKAT IS A PARSERBŐL tölti ki (a súgó szöveg formázás, a parser
-a tény), és külön teszt köti, hogy a TÉNYLEGESEN LEFUTOTT al-parancsok száma ne essen egy padló alá — egy
-szonda, ami nem fut le, nem zöld, hanem NEM MÉRT.
+So the probe now fills in the REQUIRED ARGUMENTS FROM THE PARSER TOO (the help text is formatting, the parser
+is the fact), and a separate test pins that the number of sub-commands ACTUALLY RUN does not drop below a floor — a
+probe that does not run is not green, it is NOT MEASURED.
 
-A kötött szabály: egyetlen belépő pont sem válaszolhat hibás fájlra **tracebackkel**, és nem mondhat rá
-**rc=0**-t sem.
+The bound rule: no entry point may answer a broken file with a **traceback**, nor may it say
+**rc=0** to it.
 
 stdlib unittest.
 """
@@ -31,17 +31,17 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-CASES = {"nem-JSON": "ez nem json\n",
-         "félbevágott": '{"type": "entry", "seq": 1, "prev',
-         "skalár sor": "5\n",
-         "JSON-tömb": "[1,2,3]\n",
-         "üres fájl": "",
-         "csak whitespace": "\n\n \n",
-         # EZ az alak hiányzott — érvényes JSON-objektum, ami nem bejegyzés.
-         "üres objektum": "{}\n",
-         "idegen rekordtípus": '{"kind":"valami"}\n'}
+CASES = {"non-JSON": "this is not json\n",
+         "truncated": '{"type": "entry", "seq": 1, "prev',
+         "scalar line": "5\n",
+         "JSON array": "[1,2,3]\n",
+         "empty file": "",
+         "whitespace only": "\n\n \n",
+         # THIS shape was missing — a valid JSON object that is not an entry.
+         "empty object": "{}\n",
+         "foreign record type": '{"kind":"something"}\n'}
 
-# Al-parancsok, amik NEM fájlt vesznek (kulcs, állapotírás, hálózat). SZŰK és NEVESÍTETT lista.
+# Sub-commands that do NOT take a file (key, state writing, network). A NARROW and NAMED list.
 SKIP = {("bus_notary.py", "keygen"), ("bus_notary.py", "checkpoint"), ("bus_notary.py", "record"),
         ("bus_singleflight.py", "guard")}
 
@@ -58,11 +58,11 @@ def _cli_modules():
 
 
 def _help(mod_file, *sub):
-    """Az argparse SAJÁT súgója, ALFOLYAMATBAN. SOHA nem importálunk és NEM hívunk a modulból semmit.
+    """argparse's OWN help, in a SUBPROCESS. We NEVER import and do NOT call anything from the module.
 
-    Saját hiba, rögzítve: az előző alak a modul minden callable attribútumát MEGHÍVTA, hogy parser-objektumot
-    találjon — és ezzel lefuttatta az `agent_bus.main()`-t, ami a pytest ARGV-jét kezdte parse-olni és
-    `SystemExit(2)`-vel szállt el. Egy szonda, ami a vizsgált modul kódját futtatja, nem szonda.
+    Our own error, recorded: the previous shape CALLED every callable attribute of the module to find a parser
+    object — and so it ran `agent_bus.main()`, which started parsing pytest's ARGV and
+    blew up with `SystemExit(2)`. A probe that runs the examined module's code is not a probe.
     """
     r = subprocess.run([sys.executable, os.path.join(HERE, mod_file)] + list(sub) + ["--help"],
                        capture_output=True, text=True, timeout=60)
@@ -70,7 +70,7 @@ def _help(mod_file, *sub):
 
 
 def _subcommands(mod_file):
-    """Az al-parancsok az argparse `{a,b,c}` blokkjából — ez a parser saját kiírása, nem a mi találgatásunk."""
+    """The sub-commands from argparse's `{a,b,c}` block — this is the parser's own output, not our guess."""
     m = re.search(r"\{([a-z0-9_,\-]{3,})\}", _help(mod_file))
     return sorted(m.group(1).split(",")) if m else []
 
@@ -83,34 +83,34 @@ def _usage(mod_file, sub):
 
 FILEISH = ("file", "log", "receipt", "audit", "path", "jsonl", "corpus", "export")
 
-# NEVESÍTETT felülírás: ahol a metavar NEVE nem árulja el, hogy fájlt vesz. A név-egyeztetés önmagában
-# bizonyítottan hamis eredményt ad (a `bus_notary compare a b` két NAPLÓT vesz, de a metavarok semmit nem
-# mondanak) — ezért nem okosabb heurisztikát írok, hanem kimondom, és a lista rövid marad.
+# A NAMED override: where the metavar's NAME does not reveal that it takes a file. Name matching alone
+# provably gives a false result (`bus_notary compare a b` takes two LOGS, but the metavars say
+# nothing) — so I do not write a smarter heuristic, I state it, and the list stays short.
 POS_FILES = {("bus_notary.py", "compare"): 2}
 
 
 def _file_slot(mod_file, sub):
-    """-> ("pos", None) | ("opt", "--log") | None, ha ez az al-parancs EGYÁLTALÁN NEM vesz fájlt.
+    """-> ("pos", None) | ("opt", "--log") | None if this sub-command takes NO file AT ALL.
 
-    A szonda eredeti premisszája hibás volt: azt hitte, minden belépő pont fájlt vesz. Nem: az
-    `agent_bus ack <agent> <id>`, a `send <ki> <kinek> <szöveg>` és a többség NEM fájl-alapú, ezért a
-    `[modul, al-parancs, FÁJL]` hívás náluk argparse-hibán állt meg — és a szonda ezt „rendben"-nek olvasta.
-    Akit nem lehet fájllal etetni, azt NEM MÉRJÜK, de KIMONDJUK, hogy nem mértük.
+    The probe's original premise was wrong: it believed every entry point takes a file. No: the
+    `agent_bus ack <agent> <id>`, `send <who> <to whom> <text>` and the majority are NOT file-based, so the
+    `[module, sub-command, FILE]` call stopped at an argparse error for them — and the probe read that as "fine".
+    Whatever cannot be fed a file we do NOT MEASURE, but we STATE that we did not measure it.
     """
     u = _usage(mod_file, sub)
     stripped = re.sub(r"\[[^\]]*\]", " ", u)
-    # ELŐBB a POZICIONÁLIS: a `reconcile`-nak pozicionális `file`-ja IS van és fájl-szagú KAPCSOLÓI is
-    # (`--receipts`). Az előző alak a kapcsolót választotta, a pozicionális kimaradt, és az argparse
-    # „the following arguments are required: file"-lal állt meg — a szonda megint a saját hibáját mérte.
+    # POSITIONAL FIRST: `reconcile` has a positional `file` AND file-smelling SWITCHES too
+    # (`--receipts`). The previous shape chose the switch, the positional was left out, and argparse
+    # stopped with "the following arguments are required: file" — the probe measured its own error again.
     tail = re.sub(r"^\s*\S+\s+\S+\s*", "", stripped.strip())
     tail = re.sub(r"--[A-Za-z0-9\-]+\s+[A-Z][A-Z_0-9]*", " ", tail)
     for tok in re.findall(r"[A-Za-z][A-Za-z_0-9\-]*", tail):
         if any(k in tok.lower() for k in FILEISH):
             return ("pos", None)
-    # A fájl-RÉST a TELJES usage-ben keressük, nem a zárójel-mentesítettben: a `bus_notary export [--log LOG]`
-    # fájl-kapcsolója OPCIONÁLIS, tehát a zárójel-szűrő kidobta — és a szonda „nem fájl-alapú"-nak minősítette
-    # azt az al-parancsot, amin az egyik kar épp leletet mért (`export --log <szemét>` -> rc=0, üres export).
-    # A zárójel csak azt dönti el, mi KÖTELEZŐ; azt nem, hogy mi VESZ FÁJLT.
+    # We look for the file SLOT in the FULL usage, not in the bracket-stripped one: the file switch of
+    # `bus_notary export [--log LOG]` is OPTIONAL, so the bracket filter threw it out — and the probe rated as "not file-based"
+    # the very sub-command on which one arm had just measured a finding (`export --log <garbage>` -> rc=0, empty export).
+    # The brackets only decide what is REQUIRED; not what TAKES A FILE.
     for opt, _meta in re.findall(r"(--[A-Za-z0-9][A-Za-z0-9\-]*)\s+([A-Z][A-Z_0-9]*)", u):
         if any(k in opt for k in FILEISH):
             return ("opt", opt)
@@ -118,15 +118,15 @@ def _file_slot(mod_file, sub):
 
 
 def _required_opts(mod_file, sub, tmpdir):
-    """A KÖTELEZŐ kapcsolók a `usage:` sorból: az argparse a nem kötelezőket SZÖGLETES ZÁRÓJELBE teszi.
+    """The REQUIRED switches from the `usage:` line: argparse puts the non-required ones in SQUARE BRACKETS.
 
-    Enélkül a szonda 23 al-parancsból 22-t argparse-hibán mért, és a saját hibáját olvasta „rendben"-nek.
+    Without this the probe measured 22 of 23 sub-commands on an argparse error, and read its own error as "fine".
     """
     txt = _help(mod_file, sub)
     m = re.search(r"usage:(.*?)(?:\n\n|\Z)", txt, re.S)
     if not m:
         return []
-    usage = re.sub(r"\[[^\]]*\]", " ", m.group(1))          # a NEM kötelezőket kivesszük
+    usage = re.sub(r"\[[^\]]*\]", " ", m.group(1))          # we remove the NON-required ones
     argv = []
     for opt, meta in re.findall(r"(--[A-Za-z0-9][A-Za-z0-9\-]*)\s+([A-Z][A-Z_0-9]*)", usage):
         val = "1" if meta.endswith(("SEC", "SECS", "N", "COUNT", "SEQ", "WINDOW")) else "x"
@@ -140,20 +140,20 @@ def _required_opts(mod_file, sub, tmpdir):
 
 
 def _names_it(r):
-    """Kimondja-e a futás, hogy mi a baj? (REJECT / KIMONDVA / FIGYELEM a stderr-en)"""
+    """Does the run state what is wrong? (REJECT / STATED / WARNING on stderr)"""
     err = (r.stderr or "")
-    return any(k in err for k in ("REJECT", "KIMONDVA", "FIGYELEM", "NULLA BIZONYÍTÉK"))
+    return any(k in err for k in ("REJECT", "STATED", "WARNING", "ZERO EVIDENCE"))
 
 
 def _is_usage_error(r):
-    """argparse használati hiba = a szonda NEM MÉRT, nem az, hogy a kód rendben van."""
+    """An argparse usage error = the probe did NOT MEASURE, not that the code is fine."""
     err = (r.stderr or "")
     return r.returncode == 2 and ("usage:" in err or "arguments are required" in err
                                   or "invalid choice" in err or "unrecognized arguments" in err)
 
 
 def _sweep():
-    """-> (mérve, nem_mérve, leletek)"""
+    """-> (measured, not_measured, findings)"""
     measured, unmeasured, bad, notfile = [], [], [], []
     with tempfile.TemporaryDirectory() as tmp:
         for mod in _cli_modules():
@@ -164,7 +164,7 @@ def _sweep():
                 npos = POS_FILES.get((mod, sub))
                 if npos:
                     slot = ("pos", npos)
-                if slot is None:                      # nem fájl-alapú al-parancs: KIMONDVA, nem elhallgatva
+                if slot is None:                      # not a file-based sub-command: STATED, not kept quiet
                     notfile.append("%s %s" % (mod, sub))
                     continue
                 extra = _required_opts(mod, sub, tmp)
@@ -192,37 +192,37 @@ def _sweep():
                         bad.append("%s %s / %s -> TRACEBACK: %s"
                                    % (mod, sub, name, (r.stderr.strip().splitlines() or [""])[-1][:70]))
                     elif r.returncode == 0 and not _names_it(r):
-                        # A szabály ÉLESEBB alakja: nem az `rc=0` a lelet, hanem a NÉMA `rc=0`. Egy üres
-                        # napló dev-módban lehet rc=0 — de akkor KI KELL MONDANIA, hogy mi hiányzik.
-                        # (Ez a finomítás abból jött, hogy a saját őrszemem és a saját „ismeretlen kimenetel
-                        # nem vád" kontrollom ütközött: az egyik tiltotta az rc=0-t, a másik megkövetelte.)
-                        bad.append("%s %s / %s -> NÉMA ZÖLD (rc=0, a stderr nem mond semmit)"
+                        # The SHARPER form of the rule: the finding is not `rc=0` but a SILENT `rc=0`. An empty
+                        # log may be rc=0 in dev mode — but then it MUST STATE what is missing.
+                        # (This refinement came from my own sentinel colliding with my own "unknown outcome
+                        # is not an accusation" control: one forbade rc=0, the other required it.)
+                        bad.append("%s %s / %s -> SILENT GREEN (rc=0, stderr says nothing)"
                                    % (mod, sub, name))
     return measured, unmeasured, bad, notfile
 
 
 class TheSentryMustActuallyRun(unittest.TestCase):
-    """ELŐFELTÉTEL: egy szonda, ami nem fut le, nem zöld — NEM MÉRT."""
+    """PRECONDITION: a probe that does not run is not green — it is NOT MEASURED."""
 
     def test_most_subcommands_are_really_invoked(self):
         measured, unmeasured, _, notfile = _sweep()
         total = len(measured) + len(unmeasured)
-        self.assertGreater(total, 0, "a szonda egyetlen al-parancsot sem talált")
+        self.assertGreater(total, 0, "the probe found not a single sub-command")
         arany = len(measured) / float(total)
         self.assertGreaterEqual(arany, 0.75,
-                                "a szonda a hívások %.0f%%-át argparse-hibán mérte — vagyis a saját hibáját "
-                                "mérte a kód helyett. NEM MÉRT: %s" % (100 * (1 - arany), unmeasured[:8]))
+                                "the probe measured %.0f%% of the calls on an argparse error — i.e. it measured its own "
+                                "error instead of the code. NOT MEASURED: %s" % (100 * (1 - arany), unmeasured[:8]))
         subs = {x.rsplit(" / ", 1)[0] for x in measured}
         self.assertGreaterEqual(len(subs), 4,
-                                "csak %d al-parancs futott le ténylegesen (%s) — a szonda vakon lenne zöld. "
-                                "Nem fájl-alapú (KIMONDVA, nem elhallgatva): %s"
+                                "only %d sub-command(s) actually ran (%s) — the probe would be blindly green. "
+                                "Not file-based (STATED, not kept quiet): %s"
                                 % (len(subs), sorted(subs), notfile))
 
 
 class NoEntryPointAnswersWithATraceback(unittest.TestCase):
     def test_no_malformed_file_produces_a_traceback_or_a_green_rc(self):
         measured, unmeasured, bad, notfile = _sweep()
-        self.assertEqual(bad, [], "hibás fájlra traceback vagy zöld (%d mérve, %d nem mérve):\n  %s"
+        self.assertEqual(bad, [], "traceback or green on a broken file (%d measured, %d not measured):\n  %s"
                          % (len(measured), len(unmeasured), "\n  ".join(bad)))
 
 

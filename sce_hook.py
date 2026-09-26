@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""sce_hook — STABIL CSATLAKOZÁSI PONT a Silent Consensus Engine-hez (v1.2). Motor-kód NINCS itt.
+"""sce_hook — a STABLE HOOK POINT for the Silent Consensus Engine (v1.2). There is NO engine code here.
 
-Az SCE egy külön projektben él (három független implementáció bájt-egyezése + érvényes leszármazás →
-ACCEPT / REJECT / ABORT; kommunikáció nélkül). A busz CSAK szállítja a karok sds-envelope-jait, és ezen a ponton
-átadja őket egy operátor által bekötött döntőnek:
+SCE lives in a separate project (byte-match of three independent implementations + valid derivation →
+ACCEPT / REJECT / ABORT; without communication). The bus ONLY transports the arms' sds-envelopes, and at this point
+hands them to a decider wired in by the operator:
 
-    AGENT_BUS_SCE_DECIDER=modul:függvény      # pl. my_bus_adapter:decide  (a busz nem hozza, nem vendorolja)
+    AGENT_BUS_SCE_DECIDER=module:function      # e.g. my_bus_adapter:decide  (the bus does not bring or vendor it)
 
-Szerződés:
-    decide(envelopes: list[dict]) -> {"verdict": "ACCEPT" | "REJECT" | "ABORT",...tetszőleges audit-mezők}
+Contract:
+    decide(envelopes: list[dict]) -> {"verdict": "ACCEPT" | "REJECT" | "ABORT",...arbitrary audit fields}
 
-    envelopes elemei: {"id", "sender", "body", "sds"} — a body a keretezett SDS-boríték szövege, a `sds` a busz v1.1
-    ellenőrző címkéje (valid / invalid(<ok>) / unsigned / unverifiable(<ok>)). A döntő maga dönti el, mit fogad el.
+    envelopes items: {"id", "sender", "body", "sds"} — body is the text of the framed SDS envelope, `sds` is the bus's v1.1
+    check label (valid / invalid(<reason>) / unsigned / unverifiable(<reason>)). The decider itself decides what it accepts.
 
-Viselkedés:
-- Nincs bekötött döntő → `decide()` None-t ad: a busz NEM hoz döntést (nincs „alapértelmezett konszenzus").
-- A döntő kivétele, nem-dict eredménye vagy ismeretlen verdiktje → {"verdict": "ABORT", "reason": …} (fail-closed).
-- Szándékosan NINCS „konszenzus-erősség" (0–1) vagy jelentés-vektoros összeolvasztás: hasonló vélemények
-  átlaga nem bizonyíték — a verdiktet bájt-egyezés és leszármazás adja, a döntőnél."""
+Behaviour:
+- No decider wired in → `decide()` returns None: the bus makes NO decision (there is no "default consensus").
+- The decider's exception, non-dict result or unknown verdict → {"verdict": "ABORT", "reason": …} (fail-closed).
+- There is deliberately NO "consensus strength" (0–1) or meaning-vector blending: the average of similar opinions
+  is not evidence — the verdict comes from byte-match and derivation, at the decider."""
 from __future__ import annotations
 
 import importlib
@@ -39,7 +39,7 @@ def load_decider(spec: str | None = None):
 
 
 def decide(envelopes: list, *, decider=None, spec: str | None = None):
-    """-> a döntő verdiktje (dict) vagy None, ha nincs döntő bekötve."""
+    """-> the decider's verdict (dict) or None if no decider is wired in."""
     try:
         fn = decider or load_decider(spec)
     except (ImportError, AttributeError, ValueError) as e:
@@ -48,7 +48,7 @@ def decide(envelopes: list, *, decider=None, spec: str | None = None):
         return None
     try:
         res = fn(list(envelopes))
-    except Exception as e:                                     # noqa: BLE001 - bármely döntő-hiba = ABORT
+    except Exception as e:                                     # noqa: BLE001 - any decider error = ABORT
         return {"verdict": "ABORT", "reason": "decider raised: %s" % type(e).__name__}
     if not isinstance(res, dict) or res.get("verdict") not in VERDICTS:
         return {"verdict": "ABORT", "reason": "decider returned no valid verdict"}
@@ -56,22 +56,22 @@ def decide(envelopes: list, *, decider=None, spec: str | None = None):
 
 
 def envelopes_from_rows(rows: list) -> list:
-    """A `recv(verify_sds=True)` sorai közül az sds-envelope-ok a döntő formátumában."""
+    """The sds-envelopes among the rows of `recv(verify_sds=True)`, in the decider's format."""
     return [{"id": r.get("id"), "sender": r.get("sender"), "body": r.get("body"), "sds": r.get("sds")}
             for r in rows if r.get("kind") == "sds-envelope"]
 
 
-# ── v1.4: a busz-sor → kar-boríték leképezés (SCE végponttól végpontig) ─────────────────────────────────────────
+# ── v1.4: bus row → arm envelope mapping (SCE end to end) ─────────────────────────────────────────
 ARM_SCHEMA = "sce-arm-envelope/v1"
 
 
 def arm_envelope_of(env: dict, *, require_valid: bool = True):
-    """Egy `envelopes_from_rows` elem → a kar-boríték (dict) vagy None.
-    LEKÉPEZÉS (dokumentált szerződés): a busz `sds-envelope` body-ja a keretezett SDS pár `{record, envelope}`; a
-    **record `payload` mezője hordozza a `sce-arm-envelope/v1` objektumot** (schema, arm, seed, candidate_package,
-    reference_package, derive_hash[, candidate_hash]). Az SDS-boríték aláírása így a kar-borítékot is köti.
-    `require_valid`: csak a busz által `valid`-nak címkézett (aláírt, beengedett) sor adhat kar-borítékot — egy
-    aláíratlan/hamis sorból NINCS kar (a döntő ilyenkor hiányzó karra ABORT-ol, nem „két kar is elég")."""
+    """An `envelopes_from_rows` item → the arm envelope (dict) or None.
+    MAPPING (documented contract): the bus `sds-envelope` body is the framed SDS pair `{record, envelope}`; the
+    **record's `payload` field carries the `sce-arm-envelope/v1` object** (schema, arm, seed, candidate_package,
+    reference_package, derive_hash[, candidate_hash]). So the SDS envelope's signature binds the arm envelope too.
+    `require_valid`: only a row the bus labelled `valid` (signed, admitted) can give an arm envelope — from an
+    unsigned/forged row there is NO arm (the decider then ABORTs on a missing arm, not "two arms are enough")."""
     if require_valid and not str(env.get("sds") or "").startswith("valid"):
         return None
     body = env.get("body")
@@ -88,7 +88,7 @@ def arm_envelope_of(env: dict, *, require_valid: bool = True):
 
 
 def decide_rows(rows: list, *, decider=None, spec: str | None = None, require_valid: bool = True):
-    """recv(verify_sds=True) sorai → kar-borítékok → döntő. None, ha nincs döntő bekötve."""
+    """recv(verify_sds=True) rows → arm envelopes → decider. None if no decider is wired in."""
     arms = [a for a in (arm_envelope_of(e, require_valid=require_valid) for e in envelopes_from_rows(rows)) if a is not None]
     return decide(arms, decider=decider, spec=spec)
 

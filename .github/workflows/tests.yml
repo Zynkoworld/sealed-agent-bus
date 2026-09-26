@@ -1,19 +1,19 @@
-# AgentBus — a tesztkészlet EGY HARMADIK GÉPEN
+# AgentBus — the test suite ON A THIRD MACHINE
 #
-# MIÉRT: a Matesensei-oldal minden mérési jegyzőkönyve kimondja, hogy „a repóban nincs CI; minden itteni szám a
-# MI gépünkön mért szám" — és ugyanez igaz ránk. Ez a job nem azért van, mert a GitHub runner megbízhatóbb
-# nálunk, hanem mert HARMADIK gép: a számot egyik fél gépe sem állítja elő egyedül.
+# WHY: every measurement report from the Matesensei side states that "the repo has no CI; every number here is
+# measured on OUR machine" — and the same is true for us. This job exists not because the GitHub runner is more
+# trustworthy than us, but because it is a THIRD machine: neither party's machine produces the number alone.
 #
-# ELVEK (a capsule2-spec sds-conformance.yml mintájára):
-#   * NINCS harmadik féltől származó action (se checkout, se setup-python) — a klónozás sima `git`, a Python a
-#     runner-image rendszer-Pythonja. Kevesebb bizalmi felület, nincs mit tag-re pinelni.
-#   * A telepítés FAIL-CLOSED, hash-lockolt closure-ból (`--require-hashes --no-deps`), tehát egy megcserélt
-#     vagy elsodort függőség nem kerülhet be.
-#   * A hitelesítő fejléc maszkolva, a futás után a `.git/config`-ot ellenőrizzük, hogy NEM őrzött meg titkot.
+# PRINCIPLES (modelled on the capsule2-spec sds-conformance.yml):
+#   * NO third-party actions (no checkout, no setup-python) — cloning is plain `git`, Python is the
+#     runner image's system Python. Less trust surface, nothing to pin to a tag.
+#   * Installation is FAIL-CLOSED from a hash-locked closure (`--require-hashes --no-deps`), so a swapped
+#     or drifted dependency cannot get in.
+#   * The auth header is masked; after the run we check that `.git/config` did NOT retain a secret.
 #
-# KIMONDOTT KORLÁT: ez a workflow-fájl a HEAD-en él, tehát egy PR ki tudja kapcsolni magát. Ezt a repó
-# beállításai zárják (required status check, ami a HIÁNYZÓ checket is pirosnak veszi) — tulajdonosi döntés,
-# nem kódkérdés. A `requirements-ci.txt` sem tudja pinelni önmagát.
+# STATED LIMIT: this workflow file lives at HEAD, so a PR can switch it off. That is closed by the repo
+# settings (a required status check that also treats a MISSING check as red) — an owner decision,
+# not a code question. `requirements-ci.txt` cannot pin itself either.
 name: agentbus-tests
 on:
   pull_request:
@@ -23,8 +23,8 @@ on:
 permissions:
   contents: read
 env:
-  # A SZÁNDÉKOSAN NYITOTT szondák: ezek nem hiba, hanem kimondott korlátok. A gate nem rejti el őket —
-  # külön lépésben lefutnak és a kimenetük a logban van, csak nem döntik be a zöldet.
+  # The DELIBERATELY OPEN probes: not bugs but stated limits. The gate does not hide them —
+  # they run in a separate step and their output is in the log; they just do not decide the green.
   KNOWN_OPEN: >-
     --deselect test_joint_delivery_outcome.py::ClampLiedFields::test_lied_next_id_must_not_defeat_the_clamp
     --deselect test_joint_delivery_outcome.py::ClampLiedFields::test_lied_pending_must_not_defeat_the_clamp
@@ -52,15 +52,15 @@ jobs:
           if grep -riqE 'authorization|x-access-token|bearer|basic [A-Za-z0-9+/=]{16,}' .git/config; then
             echo "FATAL: credential persisted"; exit 1
           fi
-      # MÁTRIX 7.2 (eddig nyitva: „a requirements-ci.txt nem pineli önmagát"). A closure hash-eket tartalmaz a
-      # CSOMAGOKRA, de a FÁJLT magát semmi nem kötötte: aki a closure-t kicseréli, a hash-eket is átírja, és a
-      # `--require-hashes` boldogan telepíti az ÚJ listát. A fájl digestje ezért ITT áll, a workflow-ban —
-      # cseréjéhez KÉT egyidejű szerkesztés kell, és mindkettő látszik a PR diffjében.
-      # KIMONDVA: ez a workflow-fájl is a HEAD-en él (7.1) — azt repó-beállítás zárja (required status check),
-      # nem kód. Ez a lépés a 7.2-t zárja, nem a 7.1-et.
+      # MATRIX 7.2 (open until now: "requirements-ci.txt does not pin itself"). The closure holds hashes for the
+      # PACKAGES, but nothing bound the FILE itself: whoever swaps the closure rewrites the hashes too, and
+      # `--require-hashes` happily installs the NEW list. So the file's digest lives HERE, in the workflow —
+      # swapping it takes TWO simultaneous edits, and both show in the PR diff.
+      # STATED: this workflow file also lives at HEAD (7.1) — that is closed by a repo setting (required status
+      # check), not by code. This step closes 7.2, not 7.1.
       - name: Pin the closure file itself
         env:
-          CLOSURE_SHA256: 7c9b600f71f6c92335dbf4acdfeab694d2a051ebc53e053912bdbe0cff47e510
+          CLOSURE_SHA256: af7654eabe8c4c630cc8bdbbf7240d42f778affb9d88fd32498ef4d7b5439bbe
         run: |
           set -eu
           cd repo
@@ -68,8 +68,8 @@ jobs:
             echo "FATAL: requirements-ci.txt does not match the digest pinned in this workflow."
             echo "  measured: $(sha256sum requirements-ci.txt | cut -d' ' -f1)"
             echo "  pinned  : ${CLOSURE_SHA256}"
-            echo "A closure megváltozott. Ha SZÁNDÉKOS, a workflow CLOSURE_SHA256 értékét is frissíteni kell —"
-            echo "épp ez a lényeg: a csere nem történhet EGY fájl szerkesztésével."
+            echo "The closure changed. If this is INTENTIONAL, the workflow's CLOSURE_SHA256 must be updated too —"
+            echo "that is the whole point: the swap cannot happen by editing ONE file."
             exit 1
           }
       - name: Fail-closed, hash-locked install
@@ -81,10 +81,10 @@ jobs:
           /tmp/venv/bin/python -m pip install --quiet --upgrade pip
           /tmp/venv/bin/python -m pip install --require-hashes --no-deps -r requirements-ci.txt
           /tmp/venv/bin/python -c "import cryptography, pytest; print('cryptography', cryptography.__version__)"
-      # MIÉRT sudo: az A2 kulcs-registry guardja ROOT-TULAJDONÚ kulcsfájlt és könyvtárat követel (ez maga a
-      # biztonsági tulajdonság, nem teszt-kényelem). Egy nem-root futtatónál MINDEN aláírt sor `forged` lesz, és a
-      # készlet ~26 tesztje bukik — nem hiba, hanem MÁS környezet. (A Matesensei-oldal nem-root futásainak
-      # 19/21/24/26-os bukásszámai pontosan ez az osztály.) A CI ezért úgy futtat, AHOGY A TERMÉK ÜZEMEL: root alatt.
+      # WHY sudo: the A2 key-registry guard requires a ROOT-OWNED key file and directory (that is the security
+      # property itself, not a test convenience). Under a non-root runner EVERY signed row becomes `forged`, and
+      # ~26 tests of the suite fail — not a bug but a DIFFERENT environment. (The 19/21/24/26 failure counts of the
+      # Matesensei side's non-root runs are exactly this class.) So CI runs the way THE PRODUCT OPERATES: as root.
       - name: docs_bind_probe — every "closed" matrix row must name something that exists
         run: |
           set -eu
@@ -100,8 +100,8 @@ jobs:
         run: |
           set -eu
           cd repo
-          echo "Ez a lépés SOSEM dönti be a jobot: azt méri, hány teszt bukik NEM-root futtatóval (a kulcs-guard"
-          echo "root-tulajdonú registry-t követel) — ez a magyarázat a gépenként eltérő bukásszámokra."
+          echo "This step NEVER fails the job: it measures how many tests fail under a NON-root runner (the key guard"
+          echo "requires a root-owned registry) — this explains the differing failure counts per machine."
           /tmp/venv/bin/python -m pytest -q ${KNOWN_OPEN} 2>&1 | tail -4 || true
       - name: The suite (ANY failure outside the declared-open probes FAILs the job)
         run: |
@@ -113,8 +113,8 @@ jobs:
         run: |
           set -eu
           cd repo
-          echo "Ezek a szondák SZÁNDÉKOSAN pirosak: kimondott korlátokat dokumentálnak (lásd docs/FEJLESZTES_v1.5.md)."
+          echo "These probes are DELIBERATELY red: they document stated limits (see docs/internal-hu/FEJLESZTES_v1.5.md)."
           sudo -E env "PATH=$PATH" /tmp/venv/bin/python -m pytest -q \
             test_joint_delivery_outcome.py::ClampLiedFields \
             test_joint_audit_anchor_20260916.py::AuditSliceIsUnanchored::test_chain_verify_must_anchor_the_slice_start \
-            || echo "(a fenti bukások a deklarált, nyitott tételek — a job zöldjét nem érintik)"
+            || echo "(the failures above are the declared open items — they do not affect the job's green)"

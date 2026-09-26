@@ -1,4 +1,4 @@
-"""bus_notary (v1.5) — közjegyzői napló: lánc, ellenőrzőpont, export/verify/compare, visszadátumozás, határ-integráció."""
+"""bus_notary (v1.5) — notary log: chain, checkpoint, export/verify/compare, backdating, boundary integration."""
 import json
 import os
 import sqlite3
@@ -54,7 +54,7 @@ class NotaryChainTest(_NotaryBase):
         self.assertEqual([c["seq"] for c in rep["checkpoints"]], [4, 8])
         self.assertTrue(all(c["ok"] for c in rep["checkpoints"]))
         self.assertEqual(rep["head"]["seq"], 10)
-        self.assertNotIn("secret", open(self.log).read())          # csak hash + metaadat
+        self.assertNotIn("secret", open(self.log).read())          # only hash + metadata
 
     def test_head_survives_new_instance(self):
         self.fill(3)
@@ -80,8 +80,8 @@ class NotaryChainTest(_NotaryBase):
             if r.get("type") == "entry" and r["seq"] == 6:
                 r["recipient"] = "attacker"
                 r["entry_hash"] = bn.entry_hash(r)
-        self.assertEqual([e["seq"] for e in self.errs(naive)["errors"]], [7])   # a következő prev_hash-e törik
-        prev = None                                                 # teljes újraláncolás 6-tól: az aláírt 8-as head árulja el
+        self.assertEqual([e["seq"] for e in self.errs(naive)["errors"]], [7])   # the next one's prev_hash breaks
+        prev = None                                                 # full re-chaining from 6: the signed head at 8 gives it away
         for r in recs:
             if r.get("type") != "entry":
                 continue
@@ -114,7 +114,7 @@ class NotaryChainTest(_NotaryBase):
         recs = self.fill(8)
         for r in recs:
             if r.get("type") == "checkpoint" and r["seq"] == 8:
-                r["ts_ms"] += 1                                     # aláírás már nem fedi
+                r["ts_ms"] += 1                                     # the signature no longer covers it
         rep = self.errs(recs)
         self.assertFalse(rep["ok"])
         self.assertTrue(any("forged" in e["error"] for e in rep["errors"]))
@@ -153,14 +153,14 @@ class NotaryChainTest(_NotaryBase):
     def test_backdated_claim_flagged_not_dropped(self):
         now = self.t[0]
         self.n.record(envelope="old", sender_identity="remote1", sender_auth="ssh-key", recipient="hub", kind="msg",
-                      decision="accepted", claimed_ts=(now - 3_600_000) // 1000)            # 1 órás múlt, másodpercben
+                      decision="accepted", claimed_ts=(now - 3_600_000) // 1000)            # 1 hour in the past, in seconds
         self.n.record(envelope="fresh", sender_identity="remote1", sender_auth="ssh-key", recipient="hub", kind="msg",
                       decision="accepted", claimed_ts=(now + 1000) * 1_000_000)              # ns, friss
         recs = bn.read_lines(self.log)
         rep = self.errs(recs, backdate_window_s=300)
         self.assertTrue(rep["ok"])
         self.assertEqual([b["seq"] for b in rep["backdated"]], [1])
-        self.assertEqual(len([r for r in recs if r["type"] == "entry"]), 2)                 # bizonyíték marad
+        self.assertEqual(len([r for r in recs if r["type"] == "entry"]), 2)                 # the evidence stays
 
     def test_cli_verify_and_compare_exit_codes(self):
         self.fill(8)
@@ -178,7 +178,7 @@ class NotaryChainTest(_NotaryBase):
             self.assertEqual(bn.main(["compare", exp, bad]), 1)
 
     def _foreign_chain(self):
-        """Idegen, frissen generált kulccsal aláírt, önmagában konzisztens (kitalált) lánc."""
+        """A made-up chain, signed with a foreign, freshly generated key, self-consistent on its own."""
         fseed, fpub = bn.keypair()
         flog = os.path.join(self.tmp.name, "f", "notary.jsonl")
         fn = bn.Notary(flog, seed=fseed, checkpoint_every=3, require_signing=True)
@@ -190,8 +190,8 @@ class NotaryChainTest(_NotaryBase):
         return out, fpub
 
     def test_M6_verify_without_pub_does_not_claim_trust_and_shows_signer(self):
-        """--pub nélkül egy idegen kulccsal aláírt hamis lánc NEM lehet „megbízható",
-        és a report megmutatja az aláíró kulcsot."""
+        """Without --pub a fake chain signed with a foreign key CANNOT be "trusted",
+        and the report shows the signing key."""
         fake, fpub = self._foreign_chain()
         rep = bn.verify(bn.read_lines(fake))
         self.assertFalse(rep["trusted"])
@@ -221,8 +221,8 @@ class NotaryChainTest(_NotaryBase):
         self.assertFalse(rep2["ok"] or rep2["trusted"])
 
     def test_M6b_checkpointless_slice_with_correct_pub_not_trusted(self):
-        """ellenőrzőpont nélküli szelet a HELYES --pub-bal sem trusted."""
-        self.fill(3)                                                # checkpoint_every=4 → még nincs ellenőrzőpont
+        """A slice without a checkpoint is not trusted even with the CORRECT --pub."""
+        self.fill(3)                                                # checkpoint_every=4 → no checkpoint yet
         rep = self.errs(bn.export(self.log, 1))
         self.assertTrue(rep["ok"], rep["errors"])
         self.assertEqual(rep.get("checkpoint_count"), 0)
@@ -232,9 +232,9 @@ class NotaryChainTest(_NotaryBase):
         self.assertEqual(rep.get("unverified_tail"), 3)
 
     def test_M6b_checkpoint_then_tail_reports_unverified_tail(self):
-        self.fill(6)                                                # ellenőrzőpont @4, utána 5, 6 csak hash-lánc
+        self.fill(6)                                                # checkpoint @4, after it 5, 6 only the hash chain
         rep = self.errs(bn.export(self.log, 1))
-        # kör-zárás a fedezetlen farok miatt a szelet NEM megbízható (korábban itt trusted:true állt)
+        # round closing: because of the uncovered tail the slice is NOT trusted (previously trusted:true stood here)
         self.assertTrue(rep["ok"] and not rep["trusted"], rep)
         self.assertEqual((rep.get("verified_checkpoint_count"), rep.get("covered_to_seq"), rep.get("unverified_tail")),
                          (1, 4, 2))
@@ -251,8 +251,8 @@ class NotaryChainTest(_NotaryBase):
 
 
 class Joint6RoundClose(_NotaryBase):
-    """37Z, fej af50521): BLOCKER fork mindkét ága átment; HIGH trusted:true fedezetlen
-    (átírt / kitalált) bejegyzésekre. Mind piros af50521-en, zöld utána."""
+    """37Z, head af50521): both branches of a BLOCKER fork passed; HIGH trusted:true for uncovered
+    (rewritten / made-up) entries. All red on af50521, green after it."""
 
     def _branch(self, name, extra, tag):
         import shutil
@@ -266,10 +266,10 @@ class Joint6RoundClose(_NotaryBase):
         return d
 
     def _fork(self):
-        self.fill(4)                                                 # közös előzmény, ellenőrzőpont @4
-        a = self._branch("A", 4, "A")                                # A: 5..8, ellenőrzőpont @8
-        b = self._branch("B", 8, "B")                                # B: 5..12 MÁS tartalommal, ellenőrzőpont @8, @12
-        return bn.export(a, 1), bn.export(b, 9)                      # A 1..8 (+ck8), B 9..12 (+ck12): nincs közös seq
+        self.fill(4)                                                 # shared history, checkpoint @4
+        a = self._branch("A", 4, "A")                                # A: 5..8, checkpoint @8
+        b = self._branch("B", 8, "B")                                # B: 5..12 with DIFFERENT content, checkpoints @8, @12
+        return bn.export(a, 1), bn.export(b, 9)                      # A 1..8 (+ck8), B 9..12 (+ck12): no shared seq
 
     def _rechain(self, recs, start_seq, mutate):
         last = None
@@ -286,9 +286,9 @@ class Joint6RoundClose(_NotaryBase):
     def test_fork_both_branches_pass_verify_but_compare_and_start_prev_hash_catch_it(self):
         sa, sb = self._fork()
         ra, rb = self.errs(sa), self.errs(sb)
-        self.assertTrue(ra["ok"] and rb["ok"])                      # önmagában mindkét szelet konzisztens
+        self.assertTrue(ra["ok"] and rb["ok"])                      # on its own each slice is consistent
         res = bn.compare(sa, sb)
-        self.assertIs(res["same"], False, res)                      # a határ-láncolás (B9.prev_hash != A8) = fork
+        self.assertIs(res["same"], False, res)                      # boundary chaining (B9.prev_hash != A8) = fork
         self.assertTrue(res.get("fork"), res)
         chained = bn.verify(sb, trusted_pub=self.pub, start_prev_hash=ra["head"]["hash"])
         self.assertFalse(chained["ok"])
@@ -302,7 +302,7 @@ class Joint6RoundClose(_NotaryBase):
     def test_fork_same_seq_checkpoint_different_head_is_a_fork(self):
         self.fill(4)
         a, b = self._branch("A", 4, "A"), self._branch("B", 4, "B")
-        ca = [r for r in bn.export(a, 1) if r["type"] == "checkpoint"]           # csak az ellenőrzőpontok (@8)
+        ca = [r for r in bn.export(a, 1) if r["type"] == "checkpoint"]           # only the checkpoints (@8)
         cb = [r for r in bn.export(b, 1) if r["type"] == "checkpoint"]
         res = bn.compare(ca, cb)
         self.assertIs(res["same"], False, res)
@@ -388,7 +388,7 @@ class NotaryModeTest(unittest.TestCase):
             os.environ.pop("AGENT_BUS_NOTARY_KEY", None)
             self.assertTrue(bn.enabled())
             with self.assertRaises(bn.NotaryError):
-                bn.Notary.from_env()                                 # kulcs nélkül fail-closed
+                bn.Notary.from_env()                                 # fail-closed without a key
 
     def test_product_without_crypto_fails_closed(self):
         with mock.patch.object(bn, "HAVE_CRYPTO", False):
@@ -446,12 +446,12 @@ class NotaryIntegrationTest(unittest.TestCase):
             res = ex.exchange("remote1", raw, db=db, attach_root=os.path.join(self.tmp.name, "att"), notary=self.notary)
         self.assertEqual(res["error"], "notary write failed (fail-closed)")
         self.assertEqual(res["accepted"], [])
-        # (09-15): a horgony a BUSZ-DB, nem a visszatérési érték — a naplózatlan tétel nem lehet a buszon
+        # (09-15): the anchor is the BUS DB, not the return value — an unlogged item cannot be on the bus
         with mock.patch.dict(os.environ, {"AGENT_BUS_DB": db, "AGENT_BRIDGE_DIR": self.tmp.name}, clear=False):
             import agent_bus as ab
-            ab.recv("hub", db=db)                                                  # séma-init, ha a DB még nem létezik
+            ab.recv("hub", db=db)                                                  # schema init, if the DB does not exist yet
         n = sqlite3.connect(db).execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        self.assertEqual(n, 0, "naplózatlan üzenet a busz-DB-ben")
+        self.assertEqual(n, 0, "an unlogged message in the bus DB")
         self.assertEqual([r for r in bn.read_lines(self.log) if r.get("type") == "entry"], [])
 
     def test_ssh_exchange_send_failure_after_logging_adds_rejected_entry(self):
@@ -495,7 +495,7 @@ class NotaryIntegrationTest(unittest.TestCase):
             res = ex.exchange("remote1", json.dumps(payload), db=db, attach_root=att, notary=self.notary)
         self.assertEqual(res["error"], "notary write failed (fail-closed)")
         written = [f for _, _, fs in os.walk(att) for f in fs if h in f] if os.path.isdir(att) else []
-        self.assertEqual(written, [], "naplózatlan csatolmány a tárban")
+        self.assertEqual(written, [], "an unlogged attachment in the store")
 
     def test_ssh_exchange_attachment_store_failure_after_logging_adds_rejected_entry(self):
         import bus_ssh_exchange as ex
@@ -513,7 +513,7 @@ class NotaryIntegrationTest(unittest.TestCase):
         ents = [(e["kind"], e["decision"], e["reason"]) for e in bn.read_lines(self.log) if e.get("type") == "entry"]
         self.assertEqual(ents[:3], [("attachment", "accepted", "received"), ("attachment", "rejected", "store_failed"),
                                     ("attachment", "accepted", "received")])
-        self.assertEqual(ents[3][:2], ("attachment", "rejected"))                   # alaki hiba: egyetlen rejected, tár nélkül
+        self.assertEqual(ents[3][:2], ("attachment", "rejected"))                   # a formal error: a single rejected, without the store
         self.assertEqual(len(ents), 4)
 
     def test_relay_deliver_and_pickup_notarized_sealed_ct_never_logged(self):

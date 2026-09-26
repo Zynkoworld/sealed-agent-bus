@@ -1,14 +1,14 @@
-# Hash-lockolt zárt closure az AgentBus tesztkészletéhez. Telepítés FAIL-CLOSED, ahogy a CI is teszi:
+# Hash-locked closed closure for the AgentBus test suite. Install FAIL-CLOSED, as CI does:
 #     pip install --require-hashes --no-deps -r requirements-ci.txt
 #
-# MIÉRT: a Matesensei-oldal minden mérési jegyzőkönyve kimondja, hogy „a repóban nincs CI; minden itteni szám a
-# MI gépünkön mért szám". Ugyanez igaz ránk. Ez a fájl + a workflow teszi a számot harmadik fél (GitHub runner)
-# által újrafuttathatóvá — nem azért, mert a GitHub megbízhatóbb nálunk, hanem mert EGY HARMADIK gép.
+# WHY: every measurement report from the Matesensei side states that "the repo has no CI; every number here is
+# measured on OUR machine". The same is true for us. This file + the workflow make the number re-runnable by a third
+# party (GitHub runner) — not because GitHub is more trustworthy than us, but because it is A THIRD machine.
 #
-# `--no-deps` -> minden futásidejű import explicit sor. A cryptography sorai BÁJTRA azonosak a capsule2-spec
-# `capsule-sync-v2` ágán már felülvizsgált closure-ral (cryptography -> cffi -> pycparser).
-# Platform: ubuntu-24.04 runner, CPython 3.12, linux x86_64. Más platformhoz a closure-t újra kell generálni
-# (`pip download` + `pip hash`); a job fail-closed, hash nélküli vagy eltérő artefaktumot nem telepít.
+# `--no-deps` -> every runtime import is an explicit line. The cryptography lines are BYTE-identical to the closure
+# already reviewed on the capsule2-spec `capsule-sync-v2` branch (cryptography -> cffi -> pycparser).
+# Platform: ubuntu-24.04 runner, CPython 3.12, linux x86_64. For another platform the closure must be regenerated
+# (`pip download` + `pip hash`); the job is fail-closed and installs no artefact without a hash or with a different one.
 cryptography==50.0.0 \
     --hash=sha256:06a32a980526a6ab9a4b9bf8f7385800791e2bb960903cb6b530e4817509a3b7
 cffi==2.1.1 \

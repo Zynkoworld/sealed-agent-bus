@@ -1,7 +1,7 @@
-"""bus_singleflight — „egy agent — egy instancia" regresszió. stdlib unittest.
+"""bus_singleflight — "one agent — one instance" regression. stdlib unittest.
 
-A tesztek VALÓDI OS-folyamatokat indítanak a dokumentált CLI-vel (`python3 bus_singleflight.py acquire …`),
-mert a B1 hiba pont a rövid életű CLI-hívásnál jött ki: a lock tulajdonosa a hívás végén meghalt."""
+The tests start REAL OS processes with the documented CLI (`python3 bus_singleflight.py acquire …`),
+because the B1 bug showed up exactly on the short-lived CLI call: the lock's owner died at the end of the call."""
 import json
 import os
 import subprocess
@@ -37,7 +37,7 @@ class SessionLockCli(unittest.TestCase):
         return out
 
     def test_B1_concurrent_distinct_instances_only_one_acquires(self):
-        """két egyidejű `acquire --instance PROC_A/PROC_B` → pontosan egy nyer."""
+        """two concurrent `acquire --instance PROC_A/PROC_B` → exactly one wins."""
         for _ in range(5):
             agent = "race%d" % _
             res = self._statuses([_cli(self.bridge, "acquire", "--agent", agent, "--instance", "PROC_A"),
@@ -47,9 +47,9 @@ class SessionLockCli(unittest.TestCase):
             self.assertEqual(sorted(r[0] for r in res), [0, 3], res)
 
     def test_B1_sequential_bare_acquire_does_not_steal(self):
-        """szekvenciális, flag nélküli `acquire --agent X` 1 mp-cel eltolva.
-        Ugyanabból a hívó-folyamatból (ugyanaz a tulajdonos) → a második UGYANAZT az identitást kapja
-        vissza (already-own), NEM egy új példány veszi át; egy MÁSIK, élő tulajdonos → duplikátum."""
+        """sequential, flagless `acquire --agent X` shifted by 1 second.
+        From the same calling process (the same owner) → the second gets THE SAME identity
+        back (already-own), a new instance does NOT take over; ANOTHER, live owner → duplicate."""
         r1 = self._statuses([_cli(self.bridge, "acquire", "--agent", "race2")])[0]
         self.assertEqual(r1[0], 0, r1)
         inst1 = r1[1].split()[0]
@@ -67,9 +67,9 @@ class SessionLockCli(unittest.TestCase):
             other.kill(); other.wait()
 
     def test_B1var_owner_pid_vs_nonexistent_target_never_double_acquired(self):
-        """újramérés (B1-var): `--owner-pid` vs `--target nemletezo-session` ugyanarra az
-        agentre, 15 kör → soha nem lehet két `acquired`. Korábban 9/15 kettős: a sosem-élő targettel írt
-        zárat a másik azonnal stale-nek látta és visszaigényelte, miközben az első már `acquired`-et kapott."""
+        """re-measurement (B1-var): `--owner-pid` vs `--target nemletezo-session` for the same
+        agent, 15 rounds → there can never be two `acquired`. Previously 9/15 double: the other saw a lock written with a never-live target
+        as stale immediately and reclaimed it, while the first had already got `acquired`."""
         other = subprocess.Popen(["sleep", "60"])
         try:
             for i in range(15):
@@ -92,12 +92,12 @@ def _api_acquire(bridge, agent, instance, target=None, owner_pid=None):
 
 
 class OwnerNotLiveB1var2(unittest.TestCase):
-    """CHANGES_REQUESTED, a B1-var javítás (317702e) csak a target-ágat zárta.
-    Egy SOSEM ÉLT owner-pid-del (vagy halott derivált pid-del) írt zárat a másik hívó azonnal stale-nek látja és
-    visszaigényli, miközben az első már `acquired`-et kapott → két worker. Mért: 7/15 kettős acquired.
-    4 eset × 15 kör, valódi párhuzamos folyamatok, valódi pid-liveness és valódi tmux-panel."""
+    """CHANGES_REQUESTED, the B1-var fix (317702e) closed only the target branch.
+    A lock written with a NEVER-LIVE owner pid (or a dead derived pid) is seen as stale immediately by the other caller and
+    reclaimed, while the first has already got `acquired` → two workers. Measured: 7/15 double acquired.
+    4 cases × 15 rounds, real parallel processes, real pid liveness and a real tmux pane."""
     ROUNDS = 15
-    NEVER = 999999999                                           # sosem élt pid
+    NEVER = 999999999                                           # a pid that never lived
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -129,7 +129,7 @@ class OwnerNotLiveB1var2(unittest.TestCase):
 
     def test_live_panel_dead_owner_vs_live_panel_live_owner_never_double(self):
         if not self.have_tmux:
-            self.skipTest("tmux nincs")
+            self.skipTest("no tmux")
         self.assertEqual(self._race("p", dict(instance="A", target=self.sess, owner_pid=self.NEVER),
                                     dict(instance="B", target=self.sess, owner_pid=self.live.pid)), 0)
 
@@ -165,10 +165,10 @@ class SessionLockLiveness(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_H1_target_alive_but_owner_pid_dead_is_stale(self):
-        """tmux-panel él, de az explicit owner-pid MEGHAL → a zár NEM ragadhat be.
-        B1var-2  átfogalmazás: a korábbi változat egy SOSEM ÉLT owner-pid-del kapott `acquired`-et, és ezzel
-        épp a kettős acquired-et rögzítette elvárásként. A H1 célja megmarad, valódi életciklussal: az owner él az
-        acquire-kor → acquired; `kill -9` → a guard szerint a zár már nem él → egy új hívó (élő owner-rel) igényel."""
+        """the tmux pane is alive, but the explicit owner pid DIES → the lock must NOT get stuck.
+        B1var-2  rewording: the earlier version got `acquired` with a NEVER-LIVE owner pid, and so
+        pinned exactly the double acquired as the expectation. H1's goal stays, with a real life cycle: the owner is alive at
+        acquire → acquired; `kill -9` → per the guard the lock is no longer alive → a new caller (with a live owner) claims it."""
         owner = subprocess.Popen(["sleep", "120"])
         lock = sf.SessionLock("tmuxtest", bridge=self.tmp.name, target_alive=lambda t: True)
         st, _ = lock.acquire("workerX", target="sftest:0.0", owner_pid=owner.pid)
@@ -190,15 +190,15 @@ class SessionLockLiveness(unittest.TestCase):
         self.assertTrue(lock._holder_alive(lock.holder(), time.time_ns()))
 
     def test_B1var_acquire_with_dead_target_is_refused_and_writes_nothing(self):
-        """Nem élő target az acquire pillanatában → `target-not-live`, és a lock-fájl NEM jön létre
-        (egy sosem-élő targettel írt zár mindenki másnak azonnal stale lenne → kizárólagosság-sértés)."""
+        """A non-live target at the moment of acquire → `target-not-live`, and the lock file is NOT created
+        (a lock written with a never-live target would immediately be stale for everyone else → an exclusivity violation)."""
         lock = sf.SessionLock("t4", bridge=self.tmp.name, is_alive=lambda pid: True, target_alive=lambda t: False)
-        st, _ = lock.acquire("w1", target="nincs:0.0")
+        st, _ = lock.acquire("w1", target="nosuch:0.0")
         self.assertEqual(st, "target-not-live")
         self.assertIsNone(lock.holder())
 
     def test_ttl_without_pid_is_alive_until_ttl(self):
-        """Nem-pid alakú instance (pl. „PROC_A") + nincs owner-pid: a friss zár ÉL a TTL-ig (korábban azonnal halott volt)."""
+        """A non-pid-shaped instance (e.g. "PROC_A") + no owner pid: a fresh lock is ALIVE until the TTL (previously it was immediately dead)."""
         lock = sf.SessionLock("t3", bridge=self.tmp.name, is_alive=lambda pid: False, ttl_ns=10 * 10**9)
         now = time.time_ns()
         lock.acquire("PROC_A", now_ns=now)

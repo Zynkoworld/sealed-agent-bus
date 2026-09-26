@@ -1,5 +1,5 @@
 #!/bin/sh
-# abus — stabil, interpreter-független belépő az AgentBus CLI-hez (a megosztott bridge-példányra).
-# Miért: a headless wake scope-olt permission-grantje EGY stabil parancsra szól (`abus …`), nem törékeny
-# python/python3 × út-variánsokra. Minden agent ugyanazt a (B2-fixelt) megosztott klienst hívja a wake-úton.
+# abus — stable, interpreter-independent entry point to the AgentBus CLI (on the shared bridge instance).
+# Why: the headless wake's scoped permission grant covers ONE stable command (`abus …`), not fragile
+# python/python3 × path variants. Every agent calls the same (B2-fixed) shared client on the wake path.
 exec python3 "${AGENT_BRIDGE_DIR:-$HOME/.agentbus}/agent_bus.py" "$@"

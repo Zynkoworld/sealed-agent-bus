@@ -1,16 +1,16 @@
-"""A CI zárványa pinelje ÖNMAGÁT — a támadási mátrix 7.2-es nyitott sora (2026-09-16).
+"""The CI closure pins ITSELF — the open row 7.2 of the attack matrix (2026-09-16).
 
-A sor szövege eddig: „a `requirements-ci.txt` nem pineli önmagát — NYITVA (kimondva)".
+The row's text until now: "`requirements-ci.txt` does not pin itself — OPEN (stated)".
 
-A `--require-hashes` a CSOMAGOKAT köti, a listát magát nem: aki a closure-t kicseréli, a benne lévő hash-eket
-is átírja, és a pip boldogan telepíti az ÚJ listát. A fájl digestje ezért a WORKFLOW-ban áll (`CLOSURE_SHA256`),
-tehát a cseréhez KÉT egyidejű szerkesztés kell, és mindkettő látszik a PR diffjében.
+`--require-hashes` binds the PACKAGES, not the list itself: whoever swaps the closure also rewrites the hashes
+in it, and pip happily installs the NEW list. So the file's digest lives in the WORKFLOW (`CLOSURE_SHA256`),
+so the swap takes TWO simultaneous edits, and both show in the PR diff.
 
-Ez a teszt a repóban méri ugyanazt, amit a CI lépése: ha valaki a closure-t módosítja és a workflow pinjét nem
-(vagy fordítva), az NÁLUNK is piros lesz, nem csak a runneren.
+This test measures in the repo the same thing as the CI step: if someone modifies the closure but not the workflow pin
+(or vice versa), it goes red HERE too, not only on the runner.
 
-KIMONDVA: ez a 7.2-t zárja, NEM a 7.1-et — a workflow-fájl maga a HEAD-en él, azt repó-beállítás (required
-status check) zárja, ami tulajdonosi döntés.
+STATED: this closes 7.2, NOT 7.1 — the workflow file itself lives at HEAD, which a repo setting (a required
+status check) closes, an owner decision.
 
 stdlib unittest.
 """
@@ -32,30 +32,30 @@ class ClosurePinsItself(unittest.TestCase):
     def setUp(self):
         for p in (WF, CLOSURE):
             if not os.path.exists(p):
-                self.skipTest("nincs meg: %s" % p)
+                self.skipTest("missing: %s" % p)
         self.wf = open(WF, encoding="utf-8").read()
 
     def test_the_workflow_pins_the_closure_digest(self):
-        self.assertTrue(_pins(self.wf), "a workflow nem pineli a closure digestjét (7.2 nyitva maradna)")
+        self.assertTrue(_pins(self.wf), "the workflow does not pin the closure digest (7.2 would stay open)")
 
     def test_the_pin_matches_the_file(self):
         got = hashlib.sha256(open(CLOSURE, "rb").read()).hexdigest()
         for want in _pins(self.wf):
             self.assertEqual(want, got,
-                             "a workflow CLOSURE_SHA256 pinje (%s…) nem egyezik a requirements-ci.txt "
-                             "digestjével (%s…) — a closure megváltozott, a pin nem" % (want[:12], got[:12]))
+                             "the workflow's CLOSURE_SHA256 pin (%s…) does not match the digest of requirements-ci.txt "
+                             "(%s…) — the closure changed, the pin did not" % (want[:12], got[:12]))
 
     def test_the_check_runs_before_the_install(self):
         i_pin = self.wf.find("CLOSURE_SHA256")
-        m = re.search(r"pip install [^\n]*--require-hashes", self.wf)   # a VALÓDI telepítő sor, nem a fejléc-komment
+        m = re.search(r"pip install [^\n]*--require-hashes", self.wf)   # the REAL install line, not the header comment
         i_install = m.start() if m else -1
         self.assertNotEqual(i_pin, -1)
-        self.assertNotEqual(i_install, -1, "nincs valódi `pip install --require-hashes` sor a workflow-ban")
-        self.assertLess(i_pin, i_install, "a pin-ellenőrzés a telepítés UTÁN fut — akkor már késő")
+        self.assertNotEqual(i_install, -1, "there is no real `pip install --require-hashes` line in the workflow")
+        self.assertLess(i_pin, i_install, "the pin check runs AFTER the install — by then it is too late")
 
     def test_the_install_stays_fail_closed(self):
-        self.assertIn("--require-hashes", self.wf, "a hash-kényszer eltűnt a telepítésből")
-        self.assertIn("--no-deps", self.wf, "a --no-deps eltűnt: a closure már nem zárt")
+        self.assertIn("--require-hashes", self.wf, "the hash enforcement disappeared from the install")
+        self.assertIn("--no-deps", self.wf, "--no-deps disappeared: the closure is no longer closed")
 
 
 if __name__ == "__main__":
