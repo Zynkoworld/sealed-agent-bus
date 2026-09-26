@@ -1,3 +1,12 @@
+## [1.5.5] — 2026-09-26 — translation-only release
+
+Translation-only release: all Hungarian text translated to English, internal notes moved to `docs/internal-hu/`; no behaviour change. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0; the wire contract, the signed shape and every conformance vector are byte-identical.
+
+- **Scope of "no behaviour change":** code tokens are identical to 1.5.4 (checked mechanically per file, together with the order of every `%`/`{}` format placeholder). What changed is the language of comments, docstrings, docs and user-visible strings: CLI messages, the poke prompt, the feed's `adat=` marker (now `data=`), the Telegram button texts. Tests that asserted on the old wording assert on the new wording; their logic is unchanged.
+- **Kept byte-identical on purpose:** the 27 partner-written and joint-review-line tests (outside authorship is what makes them evidence), and Hungarian test vectors / match strings whose bytes matter (the signed conformance vector, Unicode-normalization inputs, the leak scanner's Hungarian case-ending patterns, the matrix row keywords read by `docs_bind_probe.py`). One verbatim partner test asserts on the token `SZÜLŐJE`, so `agent_wake`'s two parent-directory warnings carry it as a tag.
+- **Language gate:** `tools/english_gate.py` fails on any Hungarian line outside `docs/internal-hu/`, with an exact, per-file allowlist for the literals above.
+- **The seal:** re-sealed as a NEW version — 1.5.4 is not resealed in place, so each version names exactly one byte set.
+
 ## [1.5.3] — 2026-09-21 — the packer and the seal agree on what "shipped" means; the floor is 9/9, honestly
 
 Fix release: EXACTLY the two findings of the full post-release check of the published 1.5.2, nothing else. `PROTOCOL_VERSION` stays 1.5.0, `SCHEMA_VERSION` 1.0.0. The 1.5.2 tag is frozen; this branch starts from that commit, with three changed files.
