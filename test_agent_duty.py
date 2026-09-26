@@ -175,7 +175,7 @@ class JointReviewPR3(unittest.TestCase):
     def test_HIGH2_changing_busy_pane_is_working(self):
         st = {}
         for i in range(10):
-            a, st = ad.decide(st, now=T0 + i * 3600, pane=BUSY.replace("dolgozom", "dolgozom %d" % i),
+            a, st = ad.decide(st, now=T0 + i * 3600, pane=BUSY.replace("working", "working %d" % i),
                               asleep=False, reported=0, own_prefix="Agent")
             self.assertEqual(a, "none")
 

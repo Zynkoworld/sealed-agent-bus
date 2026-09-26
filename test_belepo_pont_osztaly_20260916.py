@@ -10,7 +10,7 @@ probe, not the code:
      It actually measured ONE sub-command: `bus_notary verify` — the one that was already fixed.
      (A NIT measured this; the MEDIUM finding — `reconcile` on an empty log gives rc=0 — sat exactly in the blind
      set.)
-  3. the input shapes lacked the one that gives the HIGH: a VALID JSON OBJECT that is not an entry.
+  3. the input shapes lacked the one that gives the HIGH finding, a VALID JSON OBJECT that is not an entry.
 
 So the probe now fills in the REQUIRED ARGUMENTS FROM THE PARSER TOO (the help text is formatting, the parser
 is the fact), and a separate test pins that the number of sub-commands ACTUALLY RUN does not drop below a floor — a

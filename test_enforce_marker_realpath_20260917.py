@@ -87,7 +87,7 @@ class DoctorStatesItsScope(unittest.TestCase):
             self.assertIn("ABSENT", scope[0])
             open(enf.SYSTEM_MARKER, "w").close()
             _ok, lines = enf.doctor()
-            self.assertIn("MEGVAN", next(l for l in lines if l.startswith("scope:")))
+            self.assertIn("PRESENT", next(l for l in lines if l.startswith("scope:")))
 
 
 if __name__ == "__main__":

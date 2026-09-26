@@ -82,14 +82,14 @@ def state_dir_warnings(path=None):
         except OSError:
             break
         if pst.st_uid != 0:
-            out.append("the marker directory's PARENT (%s) is NOT root-owned (uid=%d): the directory can be "
+            out.append("the marker directory's PARENT [SZÜLŐJE] (%s) is NOT root-owned (uid=%d): the directory can be "
                        "SWAPPED by renaming, and sleep-safe protection is SILENTLY lost (the leaf's permissions do not "
                        "matter for this)" % (parent, pst.st_uid))
         # The STICKY bit (0o1000) prevents renaming/deleting a FOREIGN entry — under a sticky, root-owned
         # parent (e.g. /tmp) the root-owned marker directory CANNOT be swapped. We measured this, so we do not
         # cry wolf: broad permissions alone are a finding only if the sticky bit is absent.
         if (pst.st_mode & 0o022) and not (pst.st_mode & 0o1000):
-            out.append("the marker directory's PARENT (%s) is group/world-writable (mode=%o), and NOT sticky: the "
+            out.append("the marker directory's PARENT [SZÜLŐJE] (%s) is group/world-writable (mode=%o), and NOT sticky: the "
                        "directory can be swapped by renaming" % (parent, pst.st_mode & 0o777))
         nxt = os.path.dirname(parent)
         if nxt == parent:
