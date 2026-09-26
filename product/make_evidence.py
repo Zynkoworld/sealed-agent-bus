@@ -61,8 +61,8 @@ def provenance(files: dict, commit: str) -> dict:
         "unverifiable_in_public": [
             {"field": "source_commit", "value": commit,
              "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object "
-                       "is not in it and `git cat-file` answers 'bad object' — measured by an independent arm on "
-                       "the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
+                       "is not in it and `git cat-file` cannot resolve it — measured by an independent arm on the "
+                       "published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
              "covered_instead_by": "content_digest"},
             {"field": "built",
              "reason": "the build machine's Python version and UTC clock. Nothing in the archive can attest to "

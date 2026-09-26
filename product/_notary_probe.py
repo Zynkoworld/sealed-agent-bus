@@ -29,7 +29,12 @@ def errs_at(recs, pub):
 
 def main():
     if not bn.HAVE_CRYPTO:
-        print(json.dumps({"chapter": "notary", "status": "SKIP", "reason": "python3 cryptography is not installed"}))
+        # "not installed" was too narrow, and the narrowness was measured: a cryptography that IS installed but
+        # whose native backend cannot load lands here too (see the import guard in bus_notary). Either way the
+        # chapter is NOT MEASURED, and the reason should not claim to know which of the two it was.
+        print(json.dumps({"chapter": "notary", "status": "SKIP",
+                          "reason": "python3 cryptography is unavailable (not installed, or its native backend "
+                                    "cannot load) — the chapter is NOT MEASURED, which is not a pass"}))
         return 2
     with tempfile.TemporaryDirectory() as t:
         log = os.path.join(t, "chain.jsonl")
