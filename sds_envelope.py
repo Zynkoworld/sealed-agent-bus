@@ -40,7 +40,11 @@ _SAFE_INT = 2 ** 53 - 1
 try:
     from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
     HAVE_CRYPTO = True
-except Exception:                                           # pragma: no cover - environment-dependent
+except BaseException as _e:                                 # pragma: no cover - environment-dependent
+    # NOT `except Exception` — see the same guard in bus_notary: an INSTALLED cryptography with a broken native
+    # backend raises outside the Exception tree, and the module failed to import instead of degrading to absent.
+    if isinstance(_e, (KeyboardInterrupt, SystemExit)):
+        raise
     HAVE_CRYPTO = False
 
 

@@ -51,7 +51,15 @@ try:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
     from cryptography.exceptions import InvalidSignature
     HAVE_CRYPTO = True
-except Exception:                                           # pragma: no cover - environment-dependent
+except BaseException as _e:                                 # pragma: no cover - environment-dependent
+    # NOT `except Exception`. A cryptography that is INSTALLED but whose native backend is broken raises from
+    # OUTSIDE the Exception tree (pyo3's PanicException derives from BaseException), so `except Exception` let it
+    # escape and the whole module failed to import. Measured on a machine whose `cryptography` could not load
+    # `_cffi_backend`: the evidence envelope's chapter 2 reported FAIL — "the notary chain did not bite" — about a
+    # chapter that was never measured. Unusable is the same state as absent, and the shipped code already handles
+    # absent (fail-closed, and the chapter reports SKIP). Same guard in agent_bus, sds_envelope and bus_relay.
+    if isinstance(_e, (KeyboardInterrupt, SystemExit)):
+        raise
     HAVE_CRYPTO = False
 
 GENESIS = "0" * 64

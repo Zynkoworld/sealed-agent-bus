@@ -14,7 +14,7 @@ sealed-bus-<version>/
     verify_evidence.sh          # one command; runs chapters 1-3, prints a verdict per claim
     make_evidence.py            # how the envelope was produced (re-runnable by the buyer)
     evidence/
-      MANIFEST.json             # version, source commit, file hashes, environment, suite result
+      MANIFEST.json             # version, file hashes, content digest, provenance classes, environment, suite result
       CLAIMS.json               # claim -> tests -> guard-off mutation -> measured result
       floor/<claim>.txt         # per claim: the mutation, the test command, the observed exit codes
       suite.txt                 # full test-suite output as produced at release time
@@ -23,11 +23,12 @@ sealed-bus-<version>/
   ... the shipped source ...
 ```
 
-`MANIFEST.json` is the anchor: the release version, the source commit id, the SHA-256 of every shipped file, the
-interpreter version used at release, and the suite result at release time. The archive's own SHA-256 is published
-next to it on the distribution page, so the chain is: published hash -> archive -> manifest -> every file.
+`MANIFEST.json` is the anchor: the release version, the SHA-256 of every shipped file, the **content digest** over
+those hashes, the provenance classes (below), the interpreter version used at release, and the suite result at
+release time. The archive's own SHA-256 is published next to it on the distribution page, so the chain is:
+published hash -> archive -> manifest -> every file.
 
-## Chapter 1 — integrity of what you received
+## Chapter 1 — integrity of what you received, and provenance you can check
 
 `verify_evidence.sh` re-computes the SHA-256 of every file listed in `MANIFEST.json` and compares.
 
@@ -35,6 +36,32 @@ next to it on the distribution page, so the chain is: published hash -> archive 
 - This is deliberately not a signature check: a signature would prove we signed it, not that you got what we
   shipped. The signature lives one level up, on the published hash. (Release signing is an owner/key operation and
   is listed as an open item, not silently implied.)
+
+The chapter also checks the manifest's **provenance**, and it exists because of a measured defect. The published
+v1.5.1 offered exactly one provenance field, `source_commit` — a commit of the **build** repository. The public
+repository is a squash export, so that object is not in it: an independent arm resolved the commit and got
+`bad object`. The one provenance field on offer was the one field a reader could not check. v1.5.5 answered that in
+prose, which reads like a check without being one.
+
+So the manifest now classifies **every** one of its fields, and the verifier enforces the classification:
+
+| class | meaning | enforced as |
+|---|---|---|
+| `verifiable_in_public` | the verifier RE-DERIVES it on your machine | every listed name must have a real check behind it (`evidence.PUBLIC_CHECKS`), and that check runs |
+| `unverifiable_in_public` | you cannot check it from a public clone | each entry must state a `reason` and a `covered_instead_by` — either a field that IS re-derived, or, out loud, `nothing — stated as an unchecked claim` |
+
+A manifest field in **neither** class fails the chapter. That is the point: a check cannot go missing quietly, and
+a field cannot be dropped instead of explained.
+
+The anchor is `content_digest`, which is derivable from any fresh clone or unpacked archive:
+
+```
+sha256sum <the sealed paths> | LC_ALL=C sort -k2 | sha256sum
+```
+
+`source_commit` is still in the manifest — dropping it would hide the gap rather than close it — but it is marked
+`unverifiable_in_public`, with the reason above, and points at `content_digest` as what covers it instead. The
+verifier prints that line every run.
 
 ## Chapter 2 — the notary chain bites (run on your machine, not ours)
 

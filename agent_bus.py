@@ -153,7 +153,12 @@ try:
     from cryptography.hazmat.primitives.asymmetric import ed25519 as _a2_ed
     _A2_HAVE = True
     _A2_RAW_ENC, _A2_RAW_PUB = _a2_ser.Encoding.Raw, _a2_ser.PublicFormat.Raw
-except Exception:                                                # pragma: no cover - environment-dependent
+except BaseException as _a2_e:                                   # pragma: no cover - environment-dependent
+    # NOT `except Exception` — see the same guard in bus_notary: an INSTALLED cryptography with a broken native
+    # backend raises outside the Exception tree, and `import agent_bus` itself died instead of degrading to the
+    # already-supported unsigned (fail-closed in product mode) state.
+    if isinstance(_a2_e, (KeyboardInterrupt, SystemExit)):
+        raise
     _A2_HAVE = False
 
 
@@ -1144,6 +1149,125 @@ def mark_delivered(agent, ids, db=None):
         c.close()
 
 
+#: The hash-chained audit ops that record PROCESSING — the RECEIVING side's own proof that it did something with a
+#: message, as opposed to the transport's proof that it handed the message over. `cursor_audit.op` is free text and
+#: every consumer dispatches on the value, so this needs no schema change (the `delivered_id` / `sig` precedent).
+AUDIT_OP_PROCESSED = "processed"
+AUDIT_OP_PROCESSED_REFUSED = "processed_refused"
+
+
+def _delivered_at(agent, db=None) -> dict:
+    """-> {message id: the chain timestamp (ns) of the row that RECORDED its delivery}, for `agent`.
+
+    Delivery is read out of the HASH CHAIN, never out of `read_at`: `ack` sets `read_at` on everything it steps
+    over, including mail it never delivered (exactly the case `reconcile` exists for), so `read_at` would call a
+    skipped message delivered. Two ops record a delivery — `recv_mark` (the local page, a range) and
+    `remote_delivered` (the SSH tier, id-level) — and an `enforce_reject` row un-records the ids product mode
+    refused inside such a page, unless a later `remote_delivered` really did deliver them.
+    """
+    init(db)
+    c = _conn(db)
+    try:
+        rows = [dict(r) for r in c.execute(
+            "SELECT ts, from_id, to_id, op FROM cursor_audit WHERE agent=? ORDER BY id", (agent,))]
+        real = {r["id"] for r in c.execute("SELECT id FROM messages WHERE recipient=?", (agent,))}
+    finally:
+        c.close()
+    at, refused, redelivered = {}, set(), set()
+    for a in rows:
+        op = str(a["op"] or "")
+        if op == "remote_delivered":
+            redelivered.add(a["from_id"])
+            at.setdefault(a["from_id"], a["ts"])
+        elif op == "recv_mark":
+            for mid in range(int(a["from_id"]) + 1, int(a["to_id"]) + 1):
+                at.setdefault(mid, a["ts"])
+        elif op.startswith("enforce_reject"):
+            refused.add(a["from_id"])
+    # NOT resolved while walking: in product mode the `enforce_reject` rows are written BEFORE the `recv_mark` row
+    # of the same transaction, so discarding as we go would be undone by the page row that follows.
+    drop = (refused - redelivered) | (set(at) - real)
+    return {mid: ts for mid, ts in at.items() if mid not in drop}
+
+
+def delivered_ids(agent, db=None) -> list:
+    """The ids the hash chain records as DELIVERED to `agent` — the set a processing ack may cover."""
+    return sorted(_delivered_at(agent, db=db))
+
+
+def mark_processed(agent, ids, db=None) -> dict:
+    """PROOF OF PROCESSING: the receiving side records, in the hash chain, that it actually HANDLED these ids.
+
+    Delivery and processing are two different facts, and until now only the first one was written down.
+    `recv --mark` and `mark_delivered` prove the transport handed the message over; neither says the receiving side
+    did anything with it. A handler that returns early, swallows its own exception, or filters the message away
+    leaves a bus that looks perfectly healthy — the row is read, the cursor moved, `reconcile` is empty — and
+    nothing anywhere records that nobody acted on the message. That is the silent drop, and `processing_gap` is
+    what makes it observable.
+
+    An ack may cover ONLY an id the chain records as delivered to this agent (`delivered_ids`): a receiver that can
+    claim processing for anything can silence the audit by claiming everything. A claim for an id that was never
+    delivered is refused AND recorded, in its own `processed_refused` row — the same shape as
+    `remote_delivered_refused`, so the refusal is hash-chained rather than merely returned to the caller.
+    Idempotent: an id that already carries a `processed` row does not get a second one.
+    -> {"processed": [...], "already": [...], "refused": [...]}
+    """
+    ids = sorted({int(i) for i in (ids or []) if isinstance(i, int) and not isinstance(i, bool) and i > 0})
+    if not ids:
+        return {"processed": [], "already": [], "refused": []}
+    ok = set(delivered_ids(agent, db=db))
+    c = _conn(db)
+    try:
+        have = {r["from_id"] for r in c.execute("SELECT from_id FROM cursor_audit WHERE agent=? AND op=?",
+                                                (agent, AUDIT_OP_PROCESSED))}
+        refused = [i for i in ids if i not in ok]
+        already = [i for i in ids if i in ok and i in have]
+        fresh = [i for i in ids if i in ok and i not in have]
+        with c:
+            for i in fresh:
+                _append_audit(c, agent, i, i, AUDIT_OP_PROCESSED, 0)
+            for i in refused:
+                _append_audit(c, agent, i, i, AUDIT_OP_PROCESSED_REFUSED, 0)
+    finally:
+        c.close()
+    return {"processed": fresh, "already": already, "refused": refused}
+
+
+def processing_gap(agent, *, grace_s=0, db=None) -> list:
+    """THE SILENT-DROP DETECTOR: deliveries ACCEPTED for `agent` that nobody acknowledged as processed.
+
+    Both sides of the comparison already live in the hash-chained `cursor_audit`, so the detector needs no new
+    table and no new dependency: `_delivered_at` is what the transport accepted and handed over, the `processed`
+    rows are what the receiving side proved it handled, and the difference is a delivery that no one acted on.
+    Silence becomes a list.
+
+    `grace_s` excludes deliveries younger than that, measured on the DELIVERY row's own chain timestamp — a message
+    handed over a moment ago is in flight, not dropped. The default is 0, and reports everything outstanding:
+    a detector whose default hides findings is not a detector.
+    -> [{"id", "delivered_ts_ns", "age_s", "sender", "topic", "kind", "why"}], ordered by id
+    """
+    at = _delivered_at(agent, db=db)
+    cut = int(max(0.0, float(grace_s)) * 1_000_000_000)
+    c = _conn(db)
+    try:
+        done = {r["from_id"] for r in c.execute("SELECT from_id FROM cursor_audit WHERE agent=? AND op=?",
+                                                (agent, AUDIT_OP_PROCESSED))}
+        now, out = time.time_ns(), []
+        for mid in sorted(set(at) - done):
+            age = now - at[mid]
+            if cut and age < cut:
+                continue                                     # still in flight, not yet a finding
+            m = c.execute("SELECT sender, topic, kind FROM messages WHERE id=? AND recipient=?",
+                          (mid, agent)).fetchone()
+            out.append({"id": mid, "delivered_ts_ns": at[mid], "age_s": round(age / 1e9, 3),
+                        "sender": m["sender"] if m else None, "topic": m["topic"] if m else None,
+                        "kind": m["kind"] if m else None,
+                        "why": "accepted and delivered, but no proof-of-processing ack"})
+    finally:
+        c.close()
+    return out
+
+
 def cursor_of(agent, db=None):
     """The agent's cursor (last_seen_id; 0 if none yet)."""
     init(db)
@@ -1499,6 +1623,16 @@ def main(argv=None):
     axp = sub.add_parser("audit-export", help="the bus's hash-chained cursor_audit rows as JSONL (input for bus_notary --bus-audit)")
     axp.add_argument("--agent", required=True)
     axp.add_argument("--from-seq", dest="from_seq", type=int, default=0)
+    # Delivery is not processing: a message the transport handed over and the receiving side quietly dropped used to
+    # leave no trace at all. `processed` is the receiving side's proof, `silent-drops` is the audit of its absence.
+    pr = sub.add_parser("processed", help="proof-of-processing ack: the receiving side records that it HANDLED these ids")
+    pr.add_argument("--agent", required=True)
+    pr.add_argument("--ids", required=True, help="message ids, comma- or space-separated")
+    sd = sub.add_parser("silent-drops", help="deliveries accepted by the transport that nobody acknowledged processing")
+    sd.add_argument("--agent", required=True)
+    sd.add_argument("--grace", type=float, default=0.0,
+                    help="seconds: ignore deliveries younger than this (in flight, not dropped); default 0")
+    sd.add_argument("--json", action="store_true")
     rc = sub.add_parser("reconcile"); rc.add_argument("--agent", required=True)  # A1-L2: list of skipped-undelivered
     rp = sub.add_parser("replay"); rp.add_argument("--agent", required=True)
     rp.add_argument("--commit", action="store_true", help="actually redeliver (otherwise dry-run); OPERATOR-invoked")
@@ -1572,6 +1706,30 @@ def main(argv=None):
             for pr in res["problems"]:
                 print("  ! " + pr)
         return 0 if res["ok"] else 1
+    elif args.cmd == "processed":                                # proof of processing (the receiving side's own ack)
+        try:
+            want = [int(x) for x in str(args.ids).replace(",", " ").split()]
+        except ValueError:
+            sys.stderr.write("processed refused: --ids takes message ids, comma- or space-separated\n")
+            return 2
+        res = mark_processed(args.agent, want)
+        print("processed %s: %d acked, %d already acked, %d REFUSED (not delivered to this agent)%s"
+              % (args.agent, len(res["processed"]), len(res["already"]), len(res["refused"]),
+                 "" if not res["refused"] else ": " + ", ".join("#%d" % i for i in res["refused"])))
+        return 1 if res["refused"] else 0
+    elif args.cmd == "silent-drops":                             # accepted by the transport, never processed
+        rows = processing_gap(args.agent, grace_s=args.grace)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, sort_keys=True))
+        else:
+            print("silent-drops %s: %d accepted delivery(ies) with NO proof of processing" % (args.agent, len(rows)))
+            for r in rows:
+                print("  ⚠ #%s from %s (topic %s, kind %s) — delivered %.1fs ago, never processed"
+                      % (r["id"], _scrub(str(r["sender"])), _scrub(str(r["topic"])), _scrub(str(r["kind"])),
+                         r["age_s"]))
+        # A non-zero exit is what makes the silence observable from a cron job or a CI step: a drop nobody has to
+        # go looking for. `reconcile` lists messages the cursor SKIPPED; this lists messages it delivered into a void.
+        return 1 if rows else 0
     elif args.cmd == "reconcile":                               # A1-L2: what should be redelivered
         rows = reconcile(args.agent)
         print("reconcile %s: %d skipped-undelivered candidate(s)" % (args.agent, len(rows)))

@@ -1,28 +1,28 @@
 {
  "built": {
-  "python": "3.12.3",
-  "utc": "2026-09-26T04:54:50Z"
+  "python": "3.11.15",
+  "utc": "2026-09-26T19:46:09Z"
  },
- "file_count": 150,
+ "file_count": 151,
  "files": {
   ".github/workflows/tests.yml": "d1004bd85595131572dab314d82358140926b25a46ec94cb7b4333287e03344b",
   ".gitignore": "4970ff727c6d785c2b981094813d7960cbaf331500272c21f2ddfcd9581f3bbf",
-  "AGENTBUS_README.md": "568adab4a812cdfd013f321efaf325aedb38d13a1fabc08466286cc25b164265",
-  "CHANGELOG.md": "4c83e8cf9aabea2f4c881e984901ba29cd91d5b6f434981f69421746da0c01bc",
+  "AGENTBUS_README.md": "d1af39ecb8e450871fcb8dcee1985dc8dbfadb869462ed541287ae3e1c1b4f81",
+  "CHANGELOG.md": "9116f77b77a6b7fef86548729b3cd6f6b9a321bbeadf87c842010d8927b5f3fc",
   "LICENSE": "e9ceb1f8af9bdefee76485a64868905d611ed7f5f1c926801a3d084adf8dcef1",
   "README.md": "ac894820cb0881b24bc2aa17b4c655490bf176b17feda4ce3676063bfec0d48c",
   "SECURITY.md": "57ede8cc65cf7609fc616ab3c2e4a843b728644424dd858c9d6d3c06518087cc",
   "abus": "70df15b56d474407502a4397d996cdcfc9fe6d75b4c19fa32f4b4f5cbb47c134",
-  "agent_bus.py": "7ee635bcc4d8e879b610b15e7f66543c2297e1dfd3616c2368a108686e4e4195",
+  "agent_bus.py": "741565212f5e94b76746d6f9231f79ad222a0400d5e8a243aa3f6204690cab34",
   "agent_bus_watcher.py": "f60647b6ecffb160065554f3cf872af30d14d6b073f1687ed672b5052ba1c495",
   "agent_duty.py": "7708754584b91683dd618df56d7cf429cf8849b6c541b77359f8e365ea45f2c4",
   "agent_wake.py": "1c8f55ca27bb92c7f312971f23e3e54fdc72ccd156e0098806b86bb6a1dd6b4f",
   "assets/sab.png": "28a2885b92c06274f6dda47665232c4d5cadb8b2ad43cb62d007deba50a5473a",
   "bus_attach.py": "ceb1210e555e24eb2f820076b35aaeaff19031bf4e7621400469f124cdd6fa64",
   "bus_enforce.py": "09fd67fd93010ee8c3d58ef7b82779eb4808aaf37ce530add2b8b1f36f50b087",
-  "bus_notary.py": "7ecb152034f8497e57a0f692822e5f7e818750fe9ac5f0103816271ed1e707b3",
+  "bus_notary.py": "2932d9122608cb5a2982b8cba0a09e2c04bbab72c1995ca9777ad73cdeaff63b",
   "bus_poke.py": "90f682c0f429c8a497ae1a0af9c0a06f0a335d19e35c6122eebbfcf07379bf62",
-  "bus_relay.py": "3e22cb09d97a440f6a1df80f2af756d3040375e8f775c415f2d96479ab55ed0f",
+  "bus_relay.py": "cf7c037dfe028efdc3a658faa17fadcad11fcbbe2a9093d698c3c8097cf80f8e",
   "bus_singleflight.py": "1c929f9d0e0209187744c53bca417d0b8766335d52de07ce90c3bcded003a5b3",
   "bus_ssh_client.py": "01d36f2cb19a50031a93b8629efd76d2e1d2b1c963e6043d6eefe506c4500035",
   "bus_ssh_enroll.py": "8a994d39515e13656c7146e33362ea23c485e2b24d6e8cf71037721a03f312f5",
@@ -40,31 +40,31 @@
   "docs/internal-hu/TAMADASI_MATRIX_v1.5.md": "eb2c091ac3c3624480cdbf6a0b5cd188b420d0d108a214ceaa05caaa57f7efeb",
   "docs_bind_probe.py": "740adc473e18d8f86e99ffca10c7ab63b09991ccbd21276b4ac12f7c59f36ddb",
   "product/COMMERCIAL.md": "c3dad4956879d72fe1686057ebaa2b6c6d12d77318ac07d6d9a5e680da5d6e24",
-  "product/EVIDENCE_ENVELOPE.md": "4b59b79f33d78f6dae65ff3b7c79a59558098fff773f0733dee2f6decbff2ab4",
+  "product/EVIDENCE_ENVELOPE.md": "214d7bc6e8e35f7922c8f8a918b132095f51ae5e87dc73d7a70806cfb4e37474",
   "product/LICENSE_DECISION.md": "1b18ce7d9262d875df3e5d216d04acb6f00996d26a60774d29f3d0c2dce93174",
   "product/PRICING.md": "4d6bc53b3d3f42f8026f1dae2e74611ebd1447992d3d2163a0b3b564ba5207bc",
-  "product/README.md": "5adfe3f0f83b3bb95158e4071a4dbbb06d87d4d60f17c7774a4a52d4c5e0b3c5",
+  "product/README.md": "4451349296c2d6aff61916621c2a88b44b69a551174e981a524e2ec835bd848e",
   "product/RELEASE_CHECKLIST.md": "8efdb5a5475cbab9819f2957c868f96ff7e81e174c085f21feeb4dc17afe0efc",
-  "product/_notary_probe.py": "e1ea0363934e32047cf86d267097bd8bb3059e9cda54a05d773d363e20166966",
-  "product/claims.json": "9c75479c649918fc0705ab4b058b84a12a89ac64f75f2fcd171e52c21e140949",
-  "product/evidence.py": "735a9d326d7158755f7c513e5b7d6663acd4e1bd697971a2aac659b4d6e58ea3",
+  "product/_notary_probe.py": "95a7b9990bb6360e3c5ef189bb6df2ee8718eff18634bfdcbd78b197590020d6",
+  "product/claims.json": "8464fa0af1353eaa43f06622fb800185cc19bb90a3c43f929cd1d1d88323b9f4",
+  "product/evidence.py": "b10bea435529e4acbf2e3b275ebba92fe4a3729008d1adb2439edeacfb84c561",
   "product/external_arms.json": "9a337f6dac334a58ae9990ec9de4e5936307e463e9c8c7bb6abfb7836280942c",
   "product/install.sh": "561c060baf699fc3d101ec576fcbf912b1221ae1fda64a26016cdc76fa039351",
-  "product/make_evidence.py": "4a817e4bb56a8b55b9f6a75fd46a8b45631b8fb78c1c10bd5317eecf15183804",
+  "product/make_evidence.py": "6100d4f33e7f00bdd393aa1dc76ecfe62c389ba5ccce9d5386affce0a6b415d3",
   "product/make_provenance.py": "37159749015e01270e0fdf253c3349f68c486402bdddfca6f5f5a7b1f8dd1e58",
   "product/make_release.py": "050229a32d378f9cddad896ec3ffb2436bff68d8ac0c91a9b858de6ab5860ec1",
-  "product/make_release_page.py": "31414ff2e259c06a61513a3406aac16649521f63a5f2320682ccc88e36194653",
-  "product/provenance.json": "43cb1a6434b3e259e00e1980f97ac5b4f1ac85c5b39dc25e34368f807ded6f7f",
-  "product/release_preflight.py": "49f08ae010ecbc1777b3fb7ec9f0db4a38a4afbc3d7740df4266f8bdc1371d55",
-  "product/test_product_evidence.py": "48d979f57471ba89903509a1ddc7152f760a003719bf4f1664774151daff7742",
+  "product/make_release_page.py": "1c6416955372211a501d056c2946e99b7268fd429e8fb72be341944c5d5b6ea2",
+  "product/provenance.json": "1b6f0aa115cc5ab7ebab1bbeac4d061c211fe4e5d433145e0c2991a3bd88f7e9",
+  "product/release_preflight.py": "70eaaa9ac4a10ff115b3abdea6890ad5e2b4174c30d33565810b8d88a0420ae2",
+  "product/test_product_evidence.py": "69fc66bf926d9ea74f964f6901b17269a5abe855d088cd610c0e6885d241e9d9",
   "product/test_product_packaging.py": "6c3e21c874d63a9807e4c4779bbfc6fefb1d73796803319c60d2c4f033189d96",
   "product/test_product_page.py": "da9851b69da1da895b76a4f853c923545fd2851788b2d3b2fb4a9a80d1790a4c",
-  "product/verify_evidence.py": "b616f1123dfa421433fbb258c1cbb0abe43bd616e325b02e24e2fb702b7a8202",
+  "product/verify_evidence.py": "c03f33b13084bd18374db756ee7d8ac9fb446eecfbc909fe6a9f3ff54830870c",
   "product/verify_evidence.sh": "2e6c993fc0b781139c07e61e1b00fc55ffd6d697630c32da001c3a4dfbaffd4c",
-  "product/version.py": "f15e3c545c164bd943ccff8bb62a0fb0dc911f590c14415eb8df7f597556fb37",
+  "product/version.py": "81c9f3b31f8590b5efb3c3dd2acab933a983ab1bcd54a3a11e4511c6ef3072ff",
   "requirements-ci.txt": "af7654eabe8c4c630cc8bdbbf7240d42f778affb9d88fd32498ef4d7b5439bbe",
   "sce_hook.py": "5d8398def3509b856f03f30e0326de2f8b7914b638a7305d173c5393e7388361",
-  "sds_envelope.py": "816af08cde6487a071077fd937ba913e3cdbbda8c2b9dcdae7c228caa50c7132",
+  "sds_envelope.py": "991e7bbf3877baf8edebd4ad19811c172b59918087ad23b552a946c97f4eb3b5",
   "sweep_log_probe.py": "f941063d68c220896798c093903b0d9ad88032ad6e40b5a97332c6f5139d68c8",
   "test_agent_bus_security.py": "f50ea2407452adf2d01e631d425dc2f0745203c1fe048dface56c9449dda6a6b",
   "test_agent_duty.py": "33579424af3c6971d88dc90f6ef932db767eb827ef5ba884a6c4c4e9ec343ef6",
@@ -140,6 +140,7 @@
   "test_signed_shape_interop.py": "4a6ba8fcac5069ff6290e75ae82bd4da22684e33399d96e93951becb2d564550",
   "test_signing_entry_points_agree.py": "c2766d2922a5c005fdc1141184a63f997b1c11e52dfb16290c7984792881d85e",
   "test_silent_handlers_20260916.py": "b741b3a8de776d722061cbbb7258d382ad2ec47d764320d7046e70ec81f1f94c",
+  "test_silent_processing_gap.py": "03234a3f0ce8f3ace463c62095d6fe6260f43d561310847b4a253d408ae29099",
   "test_singleflight_clock_20260916.py": "20a46129e97016a6276ef7f8c9eea5d2102384f4a8bd6054f9484abb8eb4d0e7",
   "test_singleflight_pid_reuse_20260917.py": "072703be3b4c9c2b0c27326e17bccbaf2ac958f4b702cb91ae3c7b4e53e62f79",
   "test_slice_anchor_20260916.py": "db941dc4eefc1912500153592e50dc844d87c982e35f51cf75b3cf5d7986eeb0",
@@ -157,9 +158,48 @@
   "tools/pr_gomb/telegram_gomb_poll.py": "8f610f7fb003f127ed31d63b7bdc23174d088b82ee74b0182d7df39298d29585"
  },
  "product": "sealed-bus",
- "source_commit": "713e7b533e53613a7510f121f63b93b606e6a214",
- "suite": "725 passed, 2 skipped, 2 xfailed, 98 subtests passed in 45.66s",
- "suite_first_pass": "6 failed, 720 passed, 1 skipped, 2 xfailed, 98 subtests passed in 46.04s",
+ "provenance": {
+  "content_digest": "1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636",
+  "content_digest_recipe": "sha256 over one line per sealed file — \"<sha256 of the file>  <path>\\n\" — sorted by path: i.e. the bytes of `sha256sum` output for the sealed files, hashed again. By hand from the tree root: sha256sum $(the sealed paths) | LC_ALL=C sort -k2 | sha256sum",
+  "unverifiable_in_public": [
+   {
+    "covered_instead_by": "content_digest",
+    "field": "source_commit",
+    "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` cannot resolve it — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
+    "value": "f8310c5e413c081eb92553f9dd4dc160948046b3"
+   },
+   {
+    "covered_instead_by": "nothing — stated as an unchecked claim",
+    "field": "built",
+    "reason": "the build machine's Python version and UTC clock. Nothing in the archive can attest to either; a reader can only see what the seller wrote down."
+   },
+   {
+    "covered_instead_by": "nothing — stated as an unchecked claim",
+    "field": "suite",
+    "reason": "the test-suite line MEASURED ON THE BUILD MACHINE. It is re-runnable with the runner named in suite_runner, but the numbers depend on the machine (the key-registry guard needs a root-owned registry, so a non-root run legitimately reds ~26 tests) — so a reader reproducing a different line has not caught a lie."
+   },
+   {
+    "covered_instead_by": "nothing — stated as an unchecked claim",
+    "field": "suite_first_pass",
+    "reason": "the same, for the pass measured against the PREVIOUS envelope — a build-machine record."
+   },
+   {
+    "covered_instead_by": "nothing — stated as an unchecked claim",
+    "field": "suite_runner",
+    "reason": "a statement about HOW the build machine ran the suite; the archive cannot attest to it."
+   }
+  ],
+  "verifiable_in_public": [
+   "content_digest",
+   "file_count",
+   "files",
+   "product",
+   "version"
+  ]
+ },
+ "source_commit": "f8310c5e413c081eb92553f9dd4dc160948046b3",
+ "suite": "751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.67s",
+ "suite_first_pass": "4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 54.16s",
  "suite_runner": "-m pytest -q -p no:cacheprovider",
- "version": "1.5.5"
+ "version": "1.5.6"
 }

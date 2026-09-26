@@ -37,7 +37,11 @@ try:
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
     from cryptography.exceptions import InvalidSignature, InvalidTag
     HAVE_CRYPTO = True
-except Exception:  # pragma: no cover - the relay does not start then
+except BaseException as _e:  # pragma: no cover - the relay does not start then
+    # NOT `except Exception` — see the same guard in bus_notary: an INSTALLED cryptography with a broken native
+    # backend raises outside the Exception tree, and importing the relay died instead of refusing to start.
+    if isinstance(_e, (KeyboardInterrupt, SystemExit)):
+        raise
     HAVE_CRYPTO = False
 
 V = "abr1"

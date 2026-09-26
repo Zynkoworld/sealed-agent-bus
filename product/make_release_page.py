@@ -88,6 +88,7 @@ def build(dist: str, version: str) -> dict:
         raise SystemExit("the evidence envelope does not describe the shipped tree: %s" % drift)
     ctx = {"version": version, "name": name, "sha256": rel["artifact_sha256"], "size": os.path.getsize(art),
            "commit": rel["source_commit"], "files": rel["file_count"], "suite": man.get("suite", ""),
+           "content_digest": (man.get("provenance") or {}).get("content_digest", ""),
            "chapters": chapter_rows(claims, external), "limits": readme_section("What it does not claim"),
            "measured_utc": claims.get("measured_utc", "")}
     os.makedirs(dist, exist_ok=True)
@@ -114,7 +115,8 @@ your own machine, offline, without trusting us.
 | artifact | [`{c['name']}.tar.gz`]({BASE_URL}/{c['name']}.tar.gz) ({c['size']:,} bytes, {c['files']} files) |
 | sha256 | `{c['sha256']}` |
 | hash file | [`{c['name']}.tar.gz.sha256`]({BASE_URL}/{c['name']}.tar.gz.sha256) |
-| source commit | `{c['commit']}` |
+| content digest | `{c['content_digest']}` — re-derived from the shipped files by `verify_evidence.sh` |
+| source commit (build repo — NOT resolvable in the public mirror) | `{c['commit']}` |
 | test suite at release | {c['suite']} |
 
 One command, which verifies the hash before unpacking anything:

@@ -119,6 +119,14 @@ the repository, commit and file hashes; `--external-root <checkout>` re-hashes t
   public repository after the product is sealed; the manifest does not cover them and the verifier names them as
   uncovered. The seal is about the code you run, not the page you arrived on.
 
+- **`source_commit` is a commit you cannot resolve, and the manifest says so.** It belongs to the private build
+  repository; the public repository is a squash export, so `git cat-file` cannot resolve it — an independent arm
+  measured exactly that on the published v1.5.1. The publicly re-derivable anchor is `content_digest`, a hash over
+  the shipped files' hashes that the verifier recomputes on your machine
+  (`sha256sum <the sealed paths> | LC_ALL=C sort -k2 | sha256sum`). Every manifest field is classified as either
+  re-derived in public or unverifiable-in-public with a reason, and a field in neither class fails chapter 1 — so a
+  check cannot go missing quietly.
+
 Full description: `product/EVIDENCE_ENVELOPE.md`.
 
 ## Pricing (draft)
