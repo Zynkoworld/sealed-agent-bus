@@ -1,21 +1,21 @@
-"""A kör ZÁRÓ horgonya — a támadási mátrix 2.7-es NYITOTT sora.
+"""The round's CLOSING anchor — the OPEN row 2.7 of the attack matrix.
 
-A nyitott sor szövege volt: „egykörös szeleten a második nyilvántartás következetes újraláncolása — a horgony
-a kör ELEJÉN íródik, a saját köre ack-sorát nem köti."
+The open row's text was: "consistent re-chaining of the second record on a single-round slice — the anchor
+is written at the START of the round, it does not bind its own round's ack row."
 
-Mérve: a kör NYITÓ horgonya a busz audit-láncának AKKORI fejére köt. A kör SAJÁT sorai (a `mark_delivered`
-és az `ack` audit-sorai) ez UTÁN keletkeznek — tehát egy egykörös exportot a támadó a horgony fölött
-következetesen újraláncolhatott (a lánc belsőleg ép marad, a horgony a szelet ELEJÉT köti, nem a végét).
+Measured: the round's OPENING anchor binds to the head of the bus audit chain AT THAT TIME. The round's OWN rows (the audit rows of
+`mark_delivered` and `ack`) arise AFTER that — so an attacker could consistently re-chain a single-round export above the
+anchor (the chain stays internally intact, the anchor binds the START of the slice, not its end).
 
-A javítás: a kör VÉGÉN, minden mellékhatás után egy `round_close` bejegyzés, amibe a horgonyt — a nyitó
-horgony mintájára — a KÖZJEGYZŐ számolja bele (`audit_end_seq` + `audit_end_hash`), nem az író fél. A nyitó
-bejegyzés `closes: 1`-gyel VÁLLALJA a zárást; a vállalás a hash-láncolt bejegyzésben utazik, tehát a záró
-horgony utólagos levágása bizonyíték (`audit_close_missing`), a régi, vállalás nélküli körök pedig
-változatlanul zöldek (nincs visszamenőleges pirosítás).
+The fix: at the END of the round, after every side effect, a `round_close` entry, into which the anchor — like the opening
+anchor — is computed by the NOTARY (`audit_end_seq` + `audit_end_hash`), not by the writer. The opening
+entry COMMITS to the close with `closes: 1`; the commitment travels in the hash-chained entry, so cutting off the closing
+anchor afterwards is evidence (`audit_close_missing`), while old rounds without the commitment
+stay green (no retroactive reddening).
 
-KIMONDOTT korlát: a záró írás fail-OPEN (a posta ekkor már kiment, fail-closed nem lehet) — a hibát a válasz
-`round_close: "failed"` mezője és a reconcile `audit_close_missing` eltérése mondja ki. A teljes zárás
-továbbra is külső tanú (v1.7, az üzemeltető döntése).
+STATED limit: the closing write is fail-OPEN (the mail has already gone out by then, it cannot be fail-closed) — the error is stated by the response's
+`round_close: "failed"` field and reconcile's `audit_close_missing` discrepancy. Full closure
+is still an external witness (v1.7, the operator's decision).
 
 stdlib unittest.
 """
@@ -52,7 +52,7 @@ class RoundCloseAnchor(unittest.TestCase):
         self.p.stop()
         self.tmp.cleanup()
 
-    # ── a kör: két üzenet kiadva, majd ack ──────────────────────────────────
+    # ── the round: two messages delivered, then ack ─────────────────────────────
     def round_trip(self):
         for i in range(2):
             ab.send("hub", "remote1", "ki-%d" % i, db=self.db, mirror=False)
@@ -73,8 +73,8 @@ class RoundCloseAnchor(unittest.TestCase):
             c.close()
 
     def rechain(self, rows, *, drop_last=True):
-        """A támadó KÖVETKEZETESEN újraláncol: a kör saját (utolsó) sorát elhagyja, és a maradékot úgy számolja
-        újra, hogy a lánc belsőleg ép maradjon. Ez a 2.7-es sor pontos alakja."""
+        """The attacker CONSISTENTLY re-chains: drops the round's own (last) row, and recomputes the rest so
+        that the chain stays internally intact. This is the exact shape of row 2.7."""
         keep = rows[:-1] if drop_last else list(rows)
         out, prev = [], ab._GENESIS
         for r in keep:
@@ -92,80 +92,80 @@ class RoundCloseAnchor(unittest.TestCase):
         exp = entries if entries is not None else bn.export(self.log, 1)
         return bn.reconcile(exp, "remote1", receipts, strict=True, bus_audit=bus_audit)
 
-    # ── kontroll: a becsületes kör a záró horgonnyal is zöld ─────────────────
+    # ── control: an honest round is green with the closing anchor too ─────────────────
     def test_control_honest_round_with_close_is_green(self):
         self._rt = self.round_trip()
         r = self.reconcile(self.audit_rows())
-        self.assertTrue(r["ok"], "a becsületes kör nem zöld: %r / %r" % (r["discrepancies"], r["unresolved"]))
+        self.assertTrue(r["ok"], "the honest round is not green: %r / %r" % (r["discrepancies"], r["unresolved"]))
 
-    # ── a záró horgony TÉNYLEG megvan, és a közjegyző írta bele ──────────────
+    # ── the closing anchor REALLY exists, and the notary wrote it ──────────────
     def test_close_entry_carries_a_notary_computed_anchor(self):
         self._rt = self.round_trip()
         ents = [e for e in bn.read_lines(self.log) if e.get("type") == "entry"]
         closes = [e for e in ents if e["kind"] == "round_close"]
-        self.assertTrue(closes, "nincs kör-záró bejegyzés")
+        self.assertTrue(closes, "there is no round-close entry")
         c = closes[-1]["cursor"]
         self.assertIn("audit_end_seq", c)
         self.assertRegex(str(c.get("audit_end_hash")), r"^[0-9a-f]{64}$")
         rows = self.audit_rows()
         self.assertEqual(c["audit_end_seq"], rows[-1]["seq"] if rows else 0,
-                         "a záró horgony nem a kör UTÁNI láncfejre mutat")
+                         "the closing anchor does not point to the chain head AFTER the round")
         opens = [e for e in ents if e["kind"] == "pickup" and e["decision"] == "accepted"]
-        self.assertEqual(opens[0]["cursor"].get("closes"), 1, "a nyitó bejegyzés nem VÁLLALTA a zárást")
-        # a záró bejegyzés a kör MINDEN mellékhatása után áll
+        self.assertEqual(opens[0]["cursor"].get("closes"), 1, "the opening entry did not COMMIT to the close")
+        # the closing entry stands after EVERY side effect of the round
         self.assertGreater(closes[0]["seq"], max(e["seq"] for e in ents if e["kind"] == "pickup"
                                                  and e["decision"] == "delivered"))
 
-    # ── A LELET: az egykörös szelet következetes újraláncolása ───────────────
+    # ── THE FINDING: consistent re-chaining of a single-round slice ───────────────
     def test_consistently_rechained_single_round_slice_is_caught(self):
-        # FONTOS: EGYETLEN kör. A kétkörös változatot már a KÖVETKEZŐ kör nyitó horgonya is megfogja — az volt
-        # a mátrixban a részleges enyhítés. A 2.7-es sor pont az egykörös szeletről szólt, ahol a nyitó horgony
-        # a kör ELEJÉT köti, és a kör saját sorai után nincs semmi. Itt csak a ZÁRÓ horgony maradhat tanú.
+        # IMPORTANT: a SINGLE round. The two-round variant is already caught by the NEXT round's opening anchor — that was
+        # the partial mitigation in the matrix. Row 2.7 was exactly about the single-round slice, where the opening anchor
+        # binds the START of the round, and there is nothing after the round's own rows. Here only the CLOSING anchor can remain a witness.
         for i in range(2):
             ab.send("hub", "remote1", "ki-%d" % i, db=self.db, mirror=False)
         res = ex.exchange("remote1", json.dumps({}), db=self.db,
                           attach_root=os.path.join(self.tmp.name, "att"), notary=self.notary)
         self._rt = (res, max(m["id"] for m in res["replies"]))
         rows = self.audit_rows()
-        self.assertGreaterEqual(len(rows), 2, "előfeltétel: a körnek van saját audit-sora")
-        faked = self.rechain(rows)                     # a kör SAJÁT sora eltüntetve, a lánc belsőleg ép
+        self.assertGreaterEqual(len(rows), 2, "precondition: the round has its own audit row")
+        faked = self.rechain(rows)                     # the round's OWN row removed, the chain internally intact
         chk = ab.audit_chain_verify(faked)
-        self.assertTrue(chk["ok"], "előfeltétel: a hamisított lánc BELSŐLEG ép (különben nem ez a lelet)")
+        self.assertTrue(chk["ok"], "precondition: the forged chain is INTERNALLY intact (otherwise this is not the finding)")
         r = self.reconcile(faked)
-        self.assertFalse(r["ok"], "a következetesen újraláncolt egykörös szelet zöldet kapott")
+        self.assertFalse(r["ok"], "the consistently re-chained single-round slice got green")
         types = {d["type"] for d in r["discrepancies"]} | {u["type"] for u in r["unresolved"]}
         self.assertTrue({"audit_close_not_covered", "audit_close_hash_mismatch"} & types,
-                        "nem a ZÁRÓ horgony fogta meg, hanem valami más: %r" % sorted(types))
+                        "it was not the CLOSING anchor that caught it, but something else: %r" % sorted(types))
 
-    # ── a záró bejegyzés levágása: a VÁLLALÁS miatt bizonyíték ───────────────
+    # ── cutting off the closing entry: evidence because of the COMMITMENT ───────────────
     def test_stripping_the_close_entry_is_evidence(self):
         self._rt = self.round_trip()
         ents = [e for e in bn.export(self.log, 1) if not (e.get("type") == "entry" and e.get("kind") == "round_close")]
         r = self.reconcile(self.audit_rows(), entries=ents)
         types = {d["type"] for d in r["discrepancies"]} | {u["type"] for u in r["unresolved"]}
         self.assertIn("audit_close_missing", types,
-                      "a vállalt, mégis hiányzó zárás némán átment: %r" % sorted(types))
+                      "a committed yet missing close passed silently: %r" % sorted(types))
         self.assertFalse(r["ok"])
 
-    # ── a nem-Claude kar köre EZEN a javításon  ──────────
+    # ── the non-Claude arm's round ON this fix  ──────────
     def test_close_anchor_may_not_point_at_an_older_head(self):
-        """(1) Ha a zárás a mellékhatások ELŐTT íródna, a horgony a kör ELŐTTI láncfejre mutatna — a kör saját
-        sorai megint kötetlenek lennének. A horgony MONOTON: a kör végi fej nem lehet a kör eleji előtt."""
+        """(1) If the close were written BEFORE the side effects, the anchor would point to the chain head BEFORE the round — the round's own
+        rows would be unbound again. The anchor is MONOTONIC: the head at the end of the round cannot be before the one at its start."""
         self._rt = self.round_trip()
         ents = []
         for e in bn.export(self.log, 1):
             if (e.get("type") == "entry" and e.get("kind") == "round_close"
                     and isinstance(e.get("cursor"), dict) and e["cursor"].get("audit_end_seq", 0) > 0):
-                e = dict(e, cursor=dict(e["cursor"], audit_end_seq=0))     # „a kör ELEJI fej"
+                e = dict(e, cursor=dict(e["cursor"], audit_end_seq=0))     # "the head at the start of the round"
             ents.append(e)
         r = self.reconcile(self.audit_rows(), entries=ents)
         types = {d["type"] for d in r["discrepancies"]}
         self.assertIn("audit_close_before_open", types,
-                      "a kör ELEJÉRE mutató záró horgony átment: %r" % sorted(types))
+                      "a closing anchor pointing to the START of the round passed: %r" % sorted(types))
 
     def test_a_close_that_names_another_round_does_not_count(self):
-        """(2) A sorrend csak visszatartó; a zárás MEGNEVEZI a körét. Egy máshová tartozó zárás nem tehet
-        egy záratlan kört lezárttá."""
+        """(2) Order only restrains; the close NAMES its round. A close belonging elsewhere cannot make
+        an unclosed round closed."""
         self._rt = self.round_trip()
         ents = []
         for e in bn.export(self.log, 1):
@@ -176,34 +176,34 @@ class RoundCloseAnchor(unittest.TestCase):
         r = self.reconcile(self.audit_rows(), entries=ents)
         types = {u["type"] for u in r["unresolved"]}
         self.assertIn("audit_close_missing", types,
-                      "egy MÁSIK kört megnevező zárás lezártnak mutatta ezt a kört: %r" % sorted(types))
+                      "a close naming ANOTHER round showed this round as closed: %r" % sorted(types))
 
     def test_unclosed_rounds_are_counted_not_just_soft(self):
-        """(3) „Minden kör záratlan" nem tűnhet el a soft-zajban: a jelentés SZÁMOT ad róla."""
+        """(3) "Every round unclosed" cannot disappear in the soft noise: the report gives a NUMBER for it."""
         self._rt = self.round_trip()
         ok = self.reconcile(self.audit_rows())
         self.assertGreaterEqual(ok["counts"]["rounds_pledged"], 1)
-        self.assertEqual(ok["counts"]["rounds_unclosed"], 0, "a becsületes körök záratlannak számítottak")
+        self.assertEqual(ok["counts"]["rounds_unclosed"], 0, "honest rounds counted as unclosed")
         ents = [e for e in bn.export(self.log, 1)
                 if not (e.get("type") == "entry" and e.get("kind") == "round_close")]
         bad = self.reconcile(self.audit_rows(), entries=ents)
         self.assertEqual(bad["counts"]["rounds_unclosed"], bad["counts"]["rounds_pledged"],
-                         "a záratlan körök száma nem mérhető a jelentésből")
+                         "the number of unclosed rounds cannot be measured from the report")
 
-    # ── a RÉGI, zárást nem vállaló kör nem lesz visszamenőleg piros ──────────
+    # ── an OLD round that did not commit to closing does not turn red retroactively ──────────
     def test_old_round_without_the_pledge_is_not_accused(self):
         self._rt = self.round_trip()
         ents = []
         for e in bn.export(self.log, 1):
             if e.get("type") == "entry" and e.get("kind") == "round_close":
-                continue                                # a régi verzió nem írt zárást…
+                continue                                # the old version wrote no close…
             if (e.get("type") == "entry" and e.get("kind") == "pickup" and e.get("decision") == "accepted"
                     and isinstance(e.get("cursor"), dict)):
-                e = dict(e, cursor={k: v for k, v in e["cursor"].items() if k != "closes"})   # …és nem is vállalta
+                e = dict(e, cursor={k: v for k, v in e["cursor"].items() if k != "closes"})   # …and did not commit either
             ents.append(e)
         r = self.reconcile(self.audit_rows(), entries=ents)
         types = {d["type"] for d in r["discrepancies"]} | {u["type"] for u in r["unresolved"]}
-        self.assertNotIn("audit_close_missing", types, "a régi körre is számon kértük a zárást")
+        self.assertNotIn("audit_close_missing", types, "we demanded the close from the old round too")
 
 
 if __name__ == "__main__":

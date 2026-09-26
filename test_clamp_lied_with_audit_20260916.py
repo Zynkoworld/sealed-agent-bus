@@ -1,21 +1,21 @@
-"""A `ClampLiedFields` kimondott korlátjának LEZÁRÁSA.
+"""CLOSING the stated limit of `ClampLiedFields`.
 
-az egyik kar `test_joint_delivery_outcome.py::ClampLiedFields` két szondája ma SZÁNDÉKOSAN bukik: a
-kör-bejegyzés `pending`/`next_id` mezője a vádlott ÖNBEVALLÁSA, és a közjegyzői napló önmagában nem
-cáfolja. Ezt a korlátot kimondtuk — de nem hagyjuk állni.
+One arm's two `test_joint_delivery_outcome.py::ClampLiedFields` probes fail DELIBERATELY today: the
+round entry's `pending`/`next_id` field is the accused's SELF-REPORT, and the notary log alone does not
+refute it. We stated this limit — but we do not let it stand.
 
-Ez a fájl UGYANAZT a forgatókönyvet futtatja (a szonda szerkezetét átvéve), egyetlen különbséggel:
-a `reconcile` megkapja a busz SAJÁT, hash-láncolt `cursor_audit` exportját (`bus_audit=`). A két
-nyilvántartás ellentmondása a bizonyíték:
-  - `pending_down` („nem is maradt kiadatlan")  -> a busz audit-sora 4 kiadatlan fölötti lépést rögzít;
-  - `next_id_up`  („az első kiadatlan az ack FÖLÖTT van") -> ugyanaz az állítás más szavakkal.
-Mindkettő `audit_skipped_contradicts_log` (hard) — a clamp NEM kapcsolható ki egyetlen hazug számmal,
-ha az összevetés fut.
+This file runs THE SAME scenario (taking over the probe's structure), with a single difference:
+`reconcile` gets the bus's OWN hash-chained `cursor_audit` export (`bus_audit=`). The contradiction between the two
+records is the evidence:
+  - `pending_down` ("nothing undelivered remained")  -> the bus audit row records a step over 4 undelivered rows;
+  - `next_id_up`  ("the first undelivered is ABOVE the ack") -> the same claim in other words.
+Both are `audit_skipped_contradicts_log` (hard) — the clamp CANNOT be defeated with a single lying number
+if the comparison runs.
 
-KORLÁT, amit ez sem old meg: ha ugyanaz a fél írja MINDKÉT nyilvántartást, az egyidejű hazugság nem
-zárható ki — de már két helyen kell hazudnia, és a két lánc ellentmondása bizonyíték.
+A LIMIT this does not solve either: if the same party writes BOTH records, a simultaneous lie cannot
+be ruled out — but it now has to lie in two places, and the contradiction between the two chains is evidence.
 
-stdlib unittest. Hálózat nincs, minden út /tmp alá.
+stdlib unittest. No network, every path under /tmp.
 """
 import os
 import sys
@@ -29,11 +29,11 @@ import agent_bus as ab  # noqa: E402
 import bus_notary as bn  # noqa: E402
 import bus_ssh_exchange as ex  # noqa: E402
 
-N_MAIL = 6          # ennyi üzenet vár
-N_GIVEN = 2         # ennyit ad ki a vádlott (4 elveszne)
+N_MAIL = 6          # this many messages wait
+N_GIVEN = 2         # the accused delivers this many (4 would be lost)
 
 
-@unittest.skipUnless(hasattr(ab, "audit_export"), "audit_export (67b050e+) szükséges")
+@unittest.skipUnless(hasattr(ab, "audit_export"), "audit_export (67b050e+) required")
 class ClampLieMeetsBusAudit(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -53,10 +53,10 @@ class ClampLieMeetsBusAudit(unittest.TestCase):
         self.tmp.cleanup()
 
     def report(self, lie=None, *, cross=True, round_cursor=True, ack_target=True):
-        """A valódi kiadási út; `cross=True` esetén a busz audit-exportja is a reconcile elé kerül.
+        """The real delivery path; with `cross=True` the bus audit export also goes before reconcile.
 
-        `round_cursor=False` — a kör-bejegyzésben NINCS gépi mező.
-        `ack_target=False`  — az ack-bejegyzés kurzor-mezőjéből hiányzik a `to`.
+        `round_cursor=False` — the round entry has NO machine field.
+        `ack_target=False`  — the ack entry's cursor field lacks `to`.
         """
         n = bn.Notary(self.log, seed=self.seed, checkpoint_every=1)
         rec = lambda **kw: n.record(sender_identity="peer", sender_auth="ssh-key", recipient="peer", **kw)
@@ -64,7 +64,7 @@ class ClampLieMeetsBusAudit(unittest.TestCase):
             ab.send("hub", "peer", "titkos-%d" % i, db=self.db, mirror=False)
         rows = ab.recv("peer", mark=False, limit=ex.MAX_REPLIES, db=self.db, verify_sds=True)
         allr = [{k: r.get(k) for k in ex._REPLY_KEYS if k in r} for r in rows]
-        out = allr[N_MAIL - N_GIVEN:]                       # a vádlott csak a LEGFELSŐ kettőt adja ki
+        out = allr[N_MAIL - N_GIVEN:]                       # the accused delivers only the TOP two
         cur = ab.cursor_of("peer", db=self.db)
         given = {x["id"] for x in out}
         left = [x["id"] for x in allr if x["id"] not in given]
@@ -73,7 +73,7 @@ class ClampLieMeetsBusAudit(unittest.TestCase):
             c["next_id"] = max(given) + 1
         if lie == "pending_down":
             c["pending"], c["next_id"] = len(out), 0
-        if lie == "next_id_at_ack":                         # bevallja a kihagyást, de az ack CÉLJA ALÁ tolja
+        if lie == "next_id_at_ack":                         # admits the skip, but pushes it BELOW the ack TARGET
             c["next_id"] = max(given)
         kw = {"cursor": c} if round_cursor else {}
         rec(envelope={"identity": "peer", "cursor": cur, "reply_sha256": [bn.envelope_hash(x) for x in out]},
@@ -96,73 +96,73 @@ class ClampLieMeetsBusAudit(unittest.TestCase):
                 "soft": sorted({u["type"] for u in r["unresolved"]}),
                 "skipped": sum(int(a.get("skipped_undelivered") or 0) for a in (audit or []))}
 
-    # ── kontroll: az összevetés bemenete ép (a busz saját lánca önellenőrzött) ──
+    # ── control: the comparison's input is intact (the bus's own chain is self-checked) ──
     def test_control_bus_audit_chain_verifies(self):
         self.report(None)
         rows = ab.audit_export("peer", db=self.db)
-        self.assertTrue(ab.audit_chain_verify(rows)["ok"], "a busz audit-lánca önellenőrzésen átmegy")
+        self.assertTrue(ab.audit_chain_verify(rows)["ok"], "the bus audit chain passes its self-check")
 
-    # ── kontroll: a becsületes csonkolt kör az összevetés MELLETT is bukik ────
+    # ── control: an honest truncated round fails even WITH the comparison ────
     def test_control_honest_truncated_round_still_caught(self):
         r = self.report(None, cross=True)
         self.assertIn("cursor_skips_undelivered", r["hard"])
         self.assertFalse(r["ok"])
 
-    # ── kontroll: összevetés NÉLKÜL a hazugság tényleg átmegy (ez a kimondott korlát) ──
+    # ── control: WITHOUT the comparison the lie really passes (this is the stated limit) ──
     def test_control_without_cross_check_the_lie_wins(self):
         for lie in ("pending_down", "next_id_up"):
             with self.subTest(lie=lie):
                 r = self.report(lie, cross=False)
-                self.assertEqual(r["hard"], [], "összevetés nélkül a hazug szám tisztára mossa a jelentést")
+                self.assertEqual(r["hard"], [], "without the comparison the lying number launders the report")
             self.tearDown()
             self.setUp()
 
-    # ── LEZÁRÁS: a busz saját naplójával összevetve MINDKÉT hazugság megbukik ──
+    # ── CLOSURE: compared with the bus's own log BOTH lies fail ──
     def test_lied_fields_are_contradicted_by_the_bus_audit(self):
         for lie in ("pending_down", "next_id_up"):
             with self.subTest(lie=lie):
                 r = self.report(lie, cross=True)
                 self.assertEqual(r["skipped"], N_MAIL - N_GIVEN,
-                                 "előfeltétel: a busz audit-sora tudja, hány kiadatlan fölött lépett a kurzor")
+                                 "precondition: the bus audit row knows how many undelivered rows the cursor stepped over")
                 self.assertIn("audit_skipped_contradicts_log", r["hard"],
-                              "a hazug %s mező a busz saját naplójával nem került ellentmondásba" % lie)
+                              "the lying %s field did not come into contradiction with the bus's own log" % lie)
                 self.assertFalse(r["ok"])
             self.tearDown()
             self.setUp()
 
 
-    # ── 8: három megkerülési kísérlet az összevetés ellen ──────
+    # ── 8: three bypass attempts against the comparison ──────
     def test_glm8_admitted_skip_below_the_ack_is_already_hard(self):
-        """MEGCÁFOLT lelet: „valljon be kihagyást, de tolja a next_id-t az ack alá" — ezt a RÉGI szabály fogja."""
+        """REFUTED finding: "admit a skip, but push next_id below the ack" — the OLD rule catches this."""
         r = self.report("next_id_at_ack", cross=True)
         self.assertIn("cursor_skips_undelivered", r["hard"],
-                      "a bevallott kihagyás az ack alatt: az ack csak next_id-1-ig vihette volna a kurzort")
+                      "the admitted skip below the ack: the ack could have moved the cursor only up to next_id-1")
         self.assertFalse(r["ok"])
 
     def test_glm8_missing_cursor_field_is_not_silent(self):
-        """MEGCÁFOLT lelet: „ne írj gépi mezőt" — a hiányzó mérés harmadik állapot, nem zöld."""
+        """REFUTED finding: "write no machine field" — a missing measurement is a third state, not green."""
         r = self.report(None, cross=True, round_cursor=False)
-        self.assertIn("round_pending_unknown", r["soft"], "a gépi mező hiánya nem eshet némán vissza")
+        self.assertIn("round_pending_unknown", r["soft"], "the absence of the machine field cannot fall back silently")
         self.assertFalse(r["ok"])
 
     def test_glm8_missing_ack_target_must_not_manufacture_a_contradiction(self):
-        """VALÓS lelet javítva: naplózott ack-cél nélkül (`ack_top == 0`) nem gyárthatunk ellentmondást.
+        """REAL finding fixed: without a logged ack target (`ack_top == 0`) we must not manufacture a contradiction.
 
-        A hallgatás nem bizonyíték: a `next_id > ack_top` ág csak akkor szólhat, ha tényleg láttunk ack-célt —
-        különben minden BECSÜLETES csonkolt kör hamis `audit_skipped_contradicts_log` vádat kapna.
+        Silence is not evidence: the `next_id > ack_top` branch may only speak if we really saw an ack target —
+        otherwise every HONEST truncated round would get a false `audit_skipped_contradicts_log` accusation.
         """
         r = self.report(None, cross=True, ack_target=False)
         self.assertNotIn("audit_skipped_contradicts_log", r["hard"],
-                         "ack-cél nélkül a becsületes kör HAMIS ellentmondás-vádat kapott")
-        self.assertIn("cursor_skips_undelivered", r["hard"], "a valódi kihagyást viszont továbbra is kimondjuk")
+                         "without an ack target the honest round got a FALSE contradiction accusation")
+        self.assertIn("cursor_skips_undelivered", r["hard"], "but the real skip is still stated")
 
 
 class CliRefusesGreenWithoutTheSecondRegister(ClampLieMeetsBusAudit):
-    """A korlát POLITIKÁVÁ téve: egy kör nem kap vádat attól, hogy nincs mellette a másik nyilvántartás
-    (az hamis vád lenne) — de a CLI strict/termék-módban nem ad ZÖLD lámpát nélküle."""
+    """The limit turned into POLICY: a round is not accused just because the other record is not beside it
+    (that would be a false accusation) — but in strict/product mode the CLI gives no GREEN light without it."""
 
     def files(self):
-        """Lefuttat egy BECSÜLETES, teljes kört, és kiírja a szelet + nyugták + busz-audit fájlokat."""
+        """Runs an HONEST, complete round, and writes out the slice + receipts + bus-audit files."""
         n = bn.Notary(self.log, seed=self.seed, checkpoint_every=1)
         rec = lambda **kw: n.record(sender_identity="peer", sender_auth="ssh-key", recipient="peer", **kw)
         for i in range(1, 3):
@@ -181,8 +181,8 @@ class CliRefusesGreenWithoutTheSecondRegister(ClampLieMeetsBusAudit):
         rec(envelope={"ack": ack_to, "cursor_from": base, "cursor_to": tgt}, kind="ack", decision="accepted",
             reason="cursor %d->%d (ack %d)" % (base, tgt, ack_to), cursor={"from": base, "to": tgt, "ack": ack_to})
         ab.ack("peer", ack_to, db=self.db)
-        # A kör ZÁRÓ horgonya (támadási mátrix 2.7, 2026-09-16): a valódi írófél minden mellékhatás UTÁN
-        # kiírja — a fixture ezt utánozza, különben nem a becsületes kört modellezné, hanem egy megszakadtat.
+        # The round's CLOSING anchor (attack matrix 2.7, 2026-09-16): the real writer writes it AFTER every side effect
+        # — the fixture imitates this, otherwise it would model not the honest round but an interrupted one.
         rec(envelope={"identity": "peer", "round_close": 1}, kind="round_close", decision="accepted",
             reason="close replies=%d" % len(out), cursor={"at": ab.cursor_of("peer", db=self.db),
                                                           "replies": len(out)})
@@ -203,11 +203,11 @@ class CliRefusesGreenWithoutTheSecondRegister(ClampLieMeetsBusAudit):
     def test_strict_cli_needs_the_bus_audit(self):
         exp, rp, au = self.files()
         args = ["reconcile", exp, "--identity", "peer", "--receipts", rp, "--pub", self.pub]
-        self.assertEqual(bn.main(args), 0, "dev-módban (nem strict) a becsületes kör zöld")
+        self.assertEqual(bn.main(args), 0, "in dev mode (not strict) the honest round is green")
         self.assertEqual(bn.main(args + ["--strict"]), 1,
-                         "strict-ben a busz audit-exportja NÉLKÜL nem járhat zöld lámpa (hiányos bizonyíték)")
+                         "in strict mode there can be no green light WITHOUT the bus audit export (incomplete evidence)")
         self.assertEqual(bn.main(args + ["--strict", "--bus-audit", au]), 0,
-                         "a második nyilvántartással a becsületes kör strict-ben is zöld")
+                         "with the second record the honest round is green in strict mode too")
 
 
 if __name__ == "__main__":

@@ -1,22 +1,22 @@
-"""Kliens-aláírt SSH-csere — a két gép közti NÉMA SÜKETSÉG zárása (2026-09-21, v1.5.2).
+"""Client-signed SSH exchange — closing the SILENT DEAFNESS between the two machines (2026-09-21, v1.5.2).
 
-Mért állapot a műhely-buszon (94, termék-mód): 09-19 -től MINDEN két gép közt cserélt sor eldobódott olvasáskor, miközben a küldő
-`accepted=[id]`-t kapott. Ok: a csere-végpont elvből NEM írja alá a busz-gép kulcsával a távoli fél sorát
-(sign_key=False — helyes: a busz-gép nem a feladó), de ugyanaznap a két név registry-kulcsot kapott, és a termék-mód a
-pinelt név alatti csupasz sort eldobja. A két helyes szabály együtt
-süketséget adott, és a feladó SEMMIT nem látott belőle.
+Measured state on the workshop bus (94, product mode): from 09-19 EVERY row exchanged between the two machines was dropped on read, while the sender
+got `accepted=[id]`. Cause: by principle the exchange endpoint does NOT sign the remote party's row with the bus machine's key
+(sign_key=False — correct: the bus machine is not the sender), but the same day the two names got registry keys, and product mode
+drops a bare row under a pinned name. The two correct rules together
+gave deafness, and the sender saw NOTHING of it.
 
-Zárás (három ponton): (1) `agent_bus.sign_for_send` / `check_presigned` — a feladó a SAJÁT kulcsával írja alá a sort
-a saját gépén, a busz-gép a registry ellen ellenőrzi és PONTOSAN azt tárolja (ts is a feladóé); (2) `bus_ssh_exchange`
-átadja a `ts/sig/pubkey`-t, és a csupasz sort egy pinelt név alatt termék-módban OKKAL utasítja el (nem tárolja, hogy
-aztán némán eldobódjon); (3) `bus_ssh_client.sign_outgoing` a kimenő üzeneteket automatikusan aláírja, ha a helyi
-identitás kulcsa megvan.
+Closure (at three points): (1) `agent_bus.sign_for_send` / `check_presigned` — the sender signs the row with ITS OWN key
+on its own machine, the bus machine checks it against the registry and stores EXACTLY that (the ts is the sender's too); (2) `bus_ssh_exchange`
+passes `ts/sig/pubkey` on, and in product mode rejects a bare row under a pinned name WITH A REASON (it does not store it only for it
+to be silently dropped later); (3) `bus_ssh_client.sign_outgoing` signs outgoing messages automatically if the local
+identity's key is present.
 
-Mutáns-próba: a `presigned=` átadás nélkül `test_client_signed_row_is_delivered_in_product_mode` bukik; a csere
-ingest-elutasítása nélkül `test_bare_row_under_pinned_name_is_rejected_visibly` bukik; a registry-egyeztetés nélkül
-`test_foreign_key_is_forged`; a tartalom-kötés nélkül `test_tampered_body_is_forged`.
+Mutant probe: without passing `presigned=`, `test_client_signed_row_is_delivered_in_product_mode` fails; without the exchange's
+ingest rejection `test_bare_row_under_pinned_name_is_rejected_visibly` fails; without the registry match
+`test_foreign_key_is_forged`; without the content binding `test_tampered_body_is_forged`.
 
-stdlib unittest; izolált DB / registry / notary; a csere in-process (nincs valódi ssh).
+stdlib unittest; isolated DB / registry / notary; the exchange is in-process (no real ssh).
 """
 import json
 import os
@@ -41,10 +41,10 @@ def _keypair():
     return priv.private_bytes_raw(), pub.hex()
 
 
-@unittest.skipUnless(ab._A2_HAVE, "cryptography szükséges")
+@unittest.skipUnless(ab._A2_HAVE, "cryptography required")
 class Base(unittest.TestCase):
-    """Busz-gép: registry-ben `peer` (távoli) és `hub` (helyi) kulcsa; termék-mód env-ből; közjegyző kikapcsolva
-    (a notary saját tesztjei fedik) — itt CSAK az aláírás-átvitel a tárgy."""
+    """Bus machine: the keys of `peer` (remote) and `hub` (local) in the registry; product mode from env; notary off
+    (the notary's own tests cover it) — here ONLY the transfer of the signature is the subject."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -55,7 +55,7 @@ class Base(unittest.TestCase):
         self.other_seed, self.other_pub = _keypair()
         with open(os.path.join(self.keys, "peer.pub"), "w") as f:
             f.write(peer_pub)
-        self.peer_key = os.path.join(d, "peer.ed25519.key")           # a TÁVOLI gép privát seedje (nálunk csak a tesztben)
+        self.peer_key = os.path.join(d, "peer.ed25519.key")           # the REMOTE machine's private seed (here only in the test)
         with open(self.peer_key, "w") as f:
             f.write(self.peer_seed.hex())
         self.p = [mock.patch.object(ab, "KEYS_DIR", self.keys),
@@ -90,29 +90,29 @@ class ClientSigned(Base):
         out = self.run_round([self.presigned()])
         self.assertEqual(out["rejected"], [])
         self.assertEqual(len(out["accepted"]), 1)
-        row = ab.recv("hub", db=self.db)[0]                          # termék-módú recv: az enforce szűr
+        row = ab.recv("hub", db=self.db)[0]                          # product-mode recv: enforce filters
         self.assertEqual(row["sender"], "peer")
         self.assertEqual(ab.verify_sender(row, keys_dir=self.keys), "signed")
         self.assertEqual(enf.check(row, keys_dir=self.keys), (True, "ok"))
 
     def test_the_stored_ts_is_the_signers_ts(self):
-        # a ts az aláírt tartalom része — a szerver nem oszthat újat, különben az aláírás nem verifikálna
+        # the ts is part of the signed content — the server cannot assign a new one, otherwise the signature would not verify
         m = self.presigned()
         self.run_round([m])
         row = ab.recv("hub", db=self.db)[0]
         self.assertEqual(row["ts"], m["ts"])
 
     def test_bare_row_under_pinned_name_is_rejected_visibly(self):
-        # a régi út: accepted=[id], majd olvasáskor néma eldobás. Most: rejected okkal, NEM tárolódik.
+        # the old path: accepted=[id], then a silent drop on read. Now: rejected with a reason, NOT stored.
         out = self.run_round([{"to": "hub", "body": "bare", "topic": "t"}])
         self.assertEqual(out["accepted"], [])
         self.assertEqual(len(out["rejected"]), 1)
         self.assertIn("unsigned-pinned", out["rejected"][0]["reason"])
-        self.assertIn("peer.ed25519.key", out["rejected"][0]["reason"])   # az ok MEGMONDJA, mit kell tenni
+        self.assertIn("peer.ed25519.key", out["rejected"][0]["reason"])   # the reason SAYS what to do
         self.assertEqual(ab.tail(None, limit=10, db=self.db), [])
 
     def test_bare_row_from_unpinned_identity_still_stored(self):
-        # nem-pinelt név (nincs registry-kulcs): a back-compat út marad — a szerver tárolja (dev-módban olvasható)
+        # a non-pinned name (no registry key): the back-compat path stays — the server stores it (readable in dev mode)
         out = self.run_round([{"to": "hub", "body": "bare", "topic": "t"}], identity="guest")
         self.assertEqual(len(out["accepted"]), 1)
 
@@ -122,7 +122,7 @@ class ClientSigned(Base):
         self.assertEqual(len(out["accepted"]), 1)
 
     def test_foreign_key_is_forged(self):
-        # érvényes aláírás, de NEM a registry-ben `peer`-hez kötött kulccsal → forged, nem tárolódik
+        # a valid signature, but NOT with the key bound to `peer` in the registry → forged, not stored
         out = self.run_round([self.presigned(seed=self.other_seed)])
         self.assertEqual(out["accepted"], [])
         self.assertIn("forged", out["rejected"][0]["reason"])
@@ -136,8 +136,8 @@ class ClientSigned(Base):
         self.assertIn("forged", out["rejected"][0]["reason"])
 
     def test_signature_for_another_name_does_not_verify_under_pinned_identity(self):
-        # a kliens `hub` nevében ír alá, de az SSH-identitás `peer` → a feladó mindig a pinelt identitás,
-        # és az aláírás rá nem verifikál (nem lehet más nevében aláírni, és nem lehet a nevet becsempészni)
+        # the client signs in `hub`'s name, but the SSH identity is `peer` → the sender is always the pinned identity,
+        # and the signature does not verify for it (one cannot sign in someone else's name, and cannot smuggle the name in)
         with open(os.path.join(self.keys, "hub.pub"), "w") as f:
             f.write(self.other_pub)
         out = self.run_round([self.presigned(seed=self.other_seed, sender="hub")])
@@ -158,13 +158,13 @@ class ClientSigned(Base):
                     presigned=ab.sign_for_send(self.peer_key, "peer", "hub", "x"))
 
     def test_stale_client_ts_is_still_caught_by_enforce(self):
-        # a ts a feladóé — az enforce ablaka (múlt) ugyanúgy méri, mint a helyi sorét
+        # the ts is the sender's — the enforce window (past) measures it just like a local row's
         old = time.time_ns() - (enf.WINDOW_PAST_S + 3600) * 1_000_000_000
         m = {"to": "hub", "body": "old", "topic": "t", "kind": "msg"}
         m.update(ab.sign_for_send(self.peer_key, "peer", "hub", "old", topic="t", kind="msg", ts=old))
         out = self.run_round([m])
-        self.assertEqual(len(out["accepted"]), 1)                    # tárolva (bizonyíték), de
-        self.assertEqual(ab.recv("hub", db=self.db), [])            # termék-módban nem kézbesül (stale-ts)
+        self.assertEqual(len(out["accepted"]), 1)                    # stored (evidence), but
+        self.assertEqual(ab.recv("hub", db=self.db), [])            # not delivered in product mode (stale-ts)
 
 
 class ClientSideSigning(Base):
@@ -173,7 +173,7 @@ class ClientSideSigning(Base):
                                  sign_key=self.peer_key)
         for m in msgs:
             self.assertIn("sig", m); self.assertIn("pubkey", m); self.assertIn("ts", m)
-        # amit a kliens aláírt, azt a szerver elfogadja és a címzett `signed`-nek látja
+        # what the client signed, the server accepts, and the recipient sees it as `signed`
         out = self.run_round(msgs)
         self.assertEqual(out["rejected"], [])
         rows = ab.recv("hub", db=self.db)
@@ -192,7 +192,7 @@ class ClientSideSigning(Base):
         self.assertEqual(msgs, [{"to": "hub", "body": "a"}])
 
     def test_exchange_round_signs_before_sending(self):
-        # a kliens kör: amit a hamis ssh megkap stdin-en, az már aláírt
+        # the client round: what the fake ssh receives on stdin is already signed
         import textwrap
         cap = os.path.join(self.tmp.name, "captured.json")
         fake = os.path.join(self.tmp.name, "fake_ssh.py")
@@ -208,15 +208,15 @@ class ClientSideSigning(Base):
                      state_dir=os.path.join(self.tmp.name, "st"), db=local_db, sign_key=self.peer_key)
         sent = json.load(open(cap))["messages"][0]
         self.assertIn("sig", sent)
-        # Az üzenet NEM hordoz `kind`-ot, tehát az aláírt bájtképben a kanonikus szabály szerint `kind=""`
-        # áll. Ez a sor korábban `kind="msg"`-ot várt, és ezzel a RÉGI, hibás viselkedést rögzítette: a
-        # kliens-aláíró saját `or "msg"` normalizálást hordozott, a bájtkép-építő nem. A négy aláírási
-        # belépési pont csak véletlenül egyezett; amint kettőt a specre igazítottam, ez a teszt bukott —
-        # helyesen, mert ő volt a bug utolsó őrzője.
+        # The message carries NO `kind`, so per the canonical rule the signed byte image has `kind=""`.
+        # This line used to expect `kind="msg"`, and so pinned the OLD, faulty behaviour: the
+        # client signer carried its own `or "msg"` normalization, the byte-image builder did not. The four signing
+        # entry points only matched by chance; as soon as I aligned two with the spec, this test failed —
+        # correctly, because it was the bug's last guardian.
         self.assertEqual(ab.check_presigned("peer", "hub", "signed?", sent, topic="", kind="",
                                             keys_dir=self.keys)[0], sent["ts"])
-        # Ellenpróba: a RÉGI olvasat (kind="msg") mostantól NEM verifikál — ha valaha újra átmenne,
-        # az azt jelenti, hogy valahol visszakerült egy második normalizálás.
+        # Counter-check: the OLD reading (kind="msg") no longer verifies — if it ever passed again,
+        # that means a second normalization got back in somewhere.
         with self.assertRaises(ValueError):
             ab.check_presigned("peer", "hub", "signed?", sent, topic="", kind="msg", keys_dir=self.keys)
 

@@ -7,8 +7,8 @@ case-insensitive).
 
 Deterministic: files are visited in sorted path order and the report is stable.
 Skipped: the .git directory, binary files (NUL byte or not valid UTF-8),
-docs/internal-hu/ (historical internal notes, intentionally Hungarian), and this
-script itself (it has to spell out the stop-words it looks for).
+docs/internal-hu/ (historical internal notes, intentionally Hungarian), the 27
+VERBATIM_FILES (partner/joint tests kept byte-identical), and this script itself (it has to spell out the stop-words it looks for).
 
 Usage:  python3 tools/english_gate.py [ROOT] [--quiet]
 Exit:   0 = clean, 1 = Hungarian lines found.
@@ -60,12 +60,44 @@ FILE_VECTORS = {
 }
 
 
+# Partner-written and joint-review-line tests, kept byte-identical: outside authorship is what
+# makes them evidence (see conftest.py and product/make_provenance.py). Exact names, no pattern.
+VERBATIM_FILES = (
+    "test_joint_ack_ablak_20260916.py",
+    "test_joint_ack_cover_tiers.py",
+    "test_joint_audit_anchor_20260916.py",
+    "test_joint_claimed_ack_cover.py",
+    "test_joint_clamp_optout.py",
+    "test_joint_cursor_skips_undelivered.py",
+    "test_joint_delivered_highwater.py",
+    "test_joint_delivery_outcome.py",
+    "test_joint_downgrade_scope.py",
+    "test_joint_error_reply_outcome.py",
+    "test_joint_kvantor_valalas_20260916.py",
+    "test_joint_notsent_ack_cover.py",
+    "test_joint_otodik_fok_20260916.py",
+    "test_joint_pledge_optout_20260916.py",
+    "test_joint_prefix_stall.py",
+    "test_joint_reason_optout.py",
+    "test_joint_silent_lifeboat_20260916.py",
+    "test_joint_singleflight_20260916.py",
+    "test_joint_strict_ack_anchor_20260916.py",
+    "test_joint_transient_reject.py",
+    "test_joint_verify_cursor_field_blind.py",
+    "test_joint_wake_parent_20260916.py",
+    "test_peer_notary_failopen.py",
+    "test_peer_outbound_notary.py",
+    "test_peer_receipt_before_send.py",
+    "test_peer_reconcile_ack_forgery.py",
+    "test_peer_reconcile_cursor_target.py",
+)
+
 EXCLUDED_DIRS = ("docs/internal-hu",)
 SELF = "tools/english_gate.py"
 
 
 def is_excluded(rel):
-    if rel == SELF:
+    if rel == SELF or rel in VERBATIM_FILES:
         return True
     return any(rel == d or rel.startswith(d + "/") for d in EXCLUDED_DIRS)
 
