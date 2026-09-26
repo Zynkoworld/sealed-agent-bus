@@ -1,11 +1,11 @@
 {
  "counts": {
   "first-party": 121,
-  "generated-here": 15,
+  "generated-here": 16,
   "joint-review-line": 22,
   "partner-same-business": 5,
   "third-party": 0,
-  "total": 163
+  "total": 164
  },
  "files": {
   ".github/workflows/tests.yml": "first-party",
@@ -60,6 +60,7 @@
   "product/evidence/floor/outbound-logged.txt": "generated-here",
   "product/evidence/floor/product-mode-refuses.txt": "generated-here",
   "product/evidence/floor/reconcile-two-way.txt": "generated-here",
+  "product/evidence/floor/silent-processing-gap.txt": "generated-here",
   "product/evidence/notary/PUBKEY.txt": "generated-here",
   "product/evidence/notary/chain.jsonl": "generated-here",
   "product/evidence/suite.txt": "generated-here",
