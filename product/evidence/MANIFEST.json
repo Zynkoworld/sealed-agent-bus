@@ -1,7 +1,7 @@
 {
  "built": {
   "python": "3.11.15",
-  "utc": "2026-09-26T19:37:14Z"
+  "utc": "2026-09-26T19:40:59Z"
  },
  "file_count": 151,
  "files": {
@@ -43,14 +43,14 @@
   "product/EVIDENCE_ENVELOPE.md": "214d7bc6e8e35f7922c8f8a918b132095f51ae5e87dc73d7a70806cfb4e37474",
   "product/LICENSE_DECISION.md": "1b18ce7d9262d875df3e5d216d04acb6f00996d26a60774d29f3d0c2dce93174",
   "product/PRICING.md": "4d6bc53b3d3f42f8026f1dae2e74611ebd1447992d3d2163a0b3b564ba5207bc",
-  "product/README.md": "148f0a7963b6ae17d71e5e4bc6861d1531a775b3483644faa353135e734e6021",
+  "product/README.md": "4451349296c2d6aff61916621c2a88b44b69a551174e981a524e2ec835bd848e",
   "product/RELEASE_CHECKLIST.md": "8efdb5a5475cbab9819f2957c868f96ff7e81e174c085f21feeb4dc17afe0efc",
-  "product/_notary_probe.py": "e1ea0363934e32047cf86d267097bd8bb3059e9cda54a05d773d363e20166966",
+  "product/_notary_probe.py": "95a7b9990bb6360e3c5ef189bb6df2ee8718eff18634bfdcbd78b197590020d6",
   "product/claims.json": "8464fa0af1353eaa43f06622fb800185cc19bb90a3c43f929cd1d1d88323b9f4",
   "product/evidence.py": "b10bea435529e4acbf2e3b275ebba92fe4a3729008d1adb2439edeacfb84c561",
   "product/external_arms.json": "9a337f6dac334a58ae9990ec9de4e5936307e463e9c8c7bb6abfb7836280942c",
   "product/install.sh": "561c060baf699fc3d101ec576fcbf912b1221ae1fda64a26016cdc76fa039351",
-  "product/make_evidence.py": "1e63651132575c9ce76a9950292cdda006559f45a2997d0814837687e263901e",
+  "product/make_evidence.py": "6100d4f33e7f00bdd393aa1dc76ecfe62c389ba5ccce9d5386affce0a6b415d3",
   "product/make_provenance.py": "37159749015e01270e0fdf253c3349f68c486402bdddfca6f5f5a7b1f8dd1e58",
   "product/make_release.py": "050229a32d378f9cddad896ec3ffb2436bff68d8ac0c91a9b858de6ab5860ec1",
   "product/make_release_page.py": "1c6416955372211a501d056c2946e99b7268fd429e8fb72be341944c5d5b6ea2",
@@ -159,14 +159,14 @@
  },
  "product": "sealed-bus",
  "provenance": {
-  "content_digest": "21c1b72c5eae45b801d2a169e822e7e046312f8f8e7a298fd842d0026a118e4a",
+  "content_digest": "c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987",
   "content_digest_recipe": "sha256 over one line per sealed file — \"<sha256 of the file>  <path>\\n\" — sorted by path: i.e. the bytes of `sha256sum` output for the sealed files, hashed again. By hand from the tree root: sha256sum $(the sealed paths) | LC_ALL=C sort -k2 | sha256sum",
   "unverifiable_in_public": [
    {
     "covered_instead_by": "content_digest",
     "field": "source_commit",
-    "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` answers 'bad object' — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
-    "value": "9ea32d06e697a72171ade68e7f3cbb16eaef4261"
+    "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` cannot resolve it — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
+    "value": "c63d74882a2d824167b0c3827040e71e524e2882"
    },
    {
     "covered_instead_by": "nothing — stated as an unchecked claim",
@@ -197,9 +197,9 @@
    "version"
   ]
  },
- "source_commit": "9ea32d06e697a72171ade68e7f3cbb16eaef4261",
- "suite": "751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 57.02s",
- "suite_first_pass": "9 failed, 743 passed, 1 skipped, 2 xfailed, 98 subtests passed in 56.29s",
+ "source_commit": "c63d74882a2d824167b0c3827040e71e524e2882",
+ "suite": "751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.78s",
+ "suite_first_pass": "4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 53.65s",
  "suite_runner": "-m pytest -q -p no:cacheprovider",
  "version": "1.5.6"
 }
