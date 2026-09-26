@@ -31,7 +31,7 @@ def main(argv=None) -> int:
             except OSError:
                 pass
     allsrc = "\n".join(src.values())
-    path = os.path.join(DOCS, "TAMADASI_MATRIX_v1.5.md")
+    path = os.path.join(DOCS, "internal-hu", "TAMADASI_MATRIX_v1.5.md")
     if not os.path.exists(path):
         print("docs_bind_probe: nincs támadási mátrix (%s)" % path)
         return 2
