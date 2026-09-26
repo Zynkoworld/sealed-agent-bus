@@ -66,7 +66,7 @@
    "peer_written": true,
    "mutation": {
     "file": "bus_notary.py",
-    "find": "        else:                                                    # kizárt (OSError not-sent) vagy semmi: hard vád\n            disc.append({\"type\": \"ack_logged_not_sent\", \"ack\": a, \"logged\": n, \"sent\": sent_acks[a]})",
+    "find": "        else:                                                    # ruled out (OSError not-sent) or nothing: hard accusation\n            disc.append({\"type\": \"ack_logged_not_sent\", \"ack\": a, \"logged\": n, \"sent\": sent_acks[a]})",
     "replace": "        else:\n            pass  # MUTATION: the log is no longer checked against the receipts"
    }
   },

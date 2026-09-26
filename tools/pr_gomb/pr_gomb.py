@@ -1,39 +1,39 @@
 #!/usr/bin/env python3
-"""pr_gomb — merge-jóváhagyás Telegram-gombbal: az OPERÁTOR EGY KULCSA a saját oldalán.
+"""pr_gomb — merge approval with a Telegram button: the OPERATOR'S ONE KEY on their own side.
 
-MIÉRT: a két-kulcsos szabálynak nulla kulcsa lett — mindkét agent emberhez utalta a döntést,
-de a szabály mindkét kulcsot agentre osztotta. Ez a csomag az EMBERI kulcs: egy PR-kártya Telegramon két gombbal
-([MERGE ✅] [NEM ❌]), és a kattintás maga a merge — vagy annak kimondott elmaradása.
+WHY: the two-key rule ended up with zero keys — both agents referred the decision to a human,
+but the rule assigned both keys to agents. This package is the HUMAN key: a PR card on Telegram with two buttons
+([MERGE ✅] [NO ❌]), and the click is the merge itself — or its stated omission.
 
-MIT TESZ ÉS MIT NEM (kimondva):
-  * a gomb = a MERGE MAGA, ami CSAK akkor fut le, ha a platform többi feltétele áll (kötelező jóváhagyás megvan, a fej
-    nem változott); különben KIMONDJA, miért nem — soha nem kerüli meg a branch-védelmet;
-  * a merge módja MINDIG merge-commit (soha squash/rebase: a base-pin horgonyok a merge-commit SHA-jára mutatnak);
-  * a döntés a KÉRÉSKORI FEJ-SHA-hoz kötött: ha a PR feje azóta változott, a gomb nem hajtja végre, új kérést kér;
-  * CSAK az operátor (OWNER_ID) kattintása számít; minden más feladó rögzítve, de figyelmen kívül hagyva;
-  * egy kérés EGYSZER dönthető el (idempotens); a második kattintás „már eldöntve" választ kap;
-  * minden könyv append-only (kerelmek / valaszok / dontesek.jsonl) — semmi nem törlődik;
-  * a GitHub-token és a bot-token soha nem kerül kimenetre/naplóba.
+WHAT IT DOES AND DOES NOT DO (stated):
+  * the button = the MERGE ITSELF, which runs ONLY if the platform's other conditions hold (required approval present, the head
+    has not changed); otherwise it STATES why not — it never bypasses branch protection;
+  * the merge method is ALWAYS a merge commit (never squash/rebase: the base-pin anchors point to the merge commit's SHA);
+  * the decision is bound to the head SHA AT REQUEST TIME: if the PR head has changed since, the button does not execute, it asks for a new request;
+  * ONLY the operator's (OWNER_ID) click counts; every other sender is recorded, but ignored;
+  * a request can be decided ONCE (idempotent); a second click gets an "already decided" reply;
+  * every ledger is append-only (kerelmek / valaszok / dontesek.jsonl) — nothing is deleted;
+  * the GitHub token and the bot token never go into output/logs.
 
-Beállítás: `config.json` a fájl mellett (lásd config.example.json) — vagy `PR_GOMB_CONFIG` env a fájl útjával.
+Setup: `config.json` next to the file (see config.example.json) — or the `PR_GOMB_CONFIG` env with the file's path.
   {
-    "github_org":     "Zynkoworld",                      # a repók tulajdonosa (org vagy user)
-    "github_token_file": "~/.config/agentbus/github_token",          # repo-scope token, a fájl 0600
+    "github_org":     "Zynkoworld",                      # the repos' owner (org or user)
+    "github_token_file": "~/.config/agentbus/github_token",          # repo-scope token, the file is 0600
     "telegram_bot_token_file": "~/.config/agentbus/telegram_bot_token",
-    "telegram_chat_id_file":   "~/.config/agentbus/telegram_chat_operator",   # az operátor privát chatje a bottal
-    "owner_id": 123456789,                               # az operátor Telegram user-id-ja (CSAK az ő kattintása számít)
-    "self_login": "Zynkoworld",                          # a PR-ek szerzője: ennek a review-ja nem „másé"
-    "disabled_marker": "~/.config/agentbus/telegram_DISABLED" # ha létezik, a bot nem küld (kikapcsolás fájllal, nem kóddal)
+    "telegram_chat_id_file":   "~/.config/agentbus/telegram_chat_operator",   # the operator's private chat with the bot
+    "owner_id": 123456789,                               # the operator's Telegram user id (ONLY their click counts)
+    "self_login": "Zynkoworld",                          # the PRs' author: its review is not "someone else's"
+    "disabled_marker": "~/.config/agentbus/telegram_DISABLED" # if it exists, the bot does not send (switched off by a file, not by code)
   }
 
-Használat:
-  pr_gomb.py kerd <repo> <pr>          # kérés: PR-kártya + [MERGE ✅] [NEM ❌] gomb az operátornak
-  pr_gomb.py kerd <repo> <pr> --proba  # csak megmutatja, mit küldene (nem küld, nem ír könyvet)
-  pr_gomb.py feldolgoz                 # a beérkezett gomb-válaszok végrehajtása (cronból, percenként)
-  pr_gomb.py allapot                   # függő kérések
+Usage:
+  pr_gomb.py kerd <repo> <pr>          # request: PR card + [MERGE ✅] [NO ❌] buttons to the operator
+  pr_gomb.py kerd <repo> <pr> --proba  # only shows what it would send (does not send, does not write the ledger)
+  pr_gomb.py feldolgoz                 # execute the received button replies (from cron, every minute)
+  pr_gomb.py allapot                   # pending requests
 
-A gomb-válaszokat a `telegram_gomb_poll.py` írja a `valaszok.jsonl`-be (callback_query → sor); ez a fájl NEM dönt semmiről.
-Cron (mindig fájlon át, soha csövön): lásd crontab.example.
+The button replies are written by `telegram_gomb_poll.py` into `valaszok.jsonl` (callback_query → line); that file decides NOTHING.
+Cron (always through a file, never a pipe): see crontab.example.
 """
 import hashlib
 import json
@@ -51,8 +51,8 @@ OFFSET_F = os.path.join(HERE, ".valaszok_offset")
 
 
 def _path(p):
-    """A konfigban `~` is állhat — a defaultok szándékosan a felhasználó saját könyvtárára mutatnak, nem egy
-    konkrét gép elrendezésére, ezért minden config-beli utat itt bontunk ki egy helyen."""
+    """`~` may also appear in the config — the defaults deliberately point to the user's own directory, not to a
+    particular machine's layout, so every path in the config is expanded here, in one place."""
     return os.path.expanduser(p) if p else p
 
 
@@ -65,7 +65,7 @@ def _cfg():
         c = json.load(f)
     for k in ("github_org", "github_token_file", "telegram_bot_token_file", "telegram_chat_id_file", "owner_id"):
         if k not in c:
-            raise SystemExit("pr_gomb: hiányzó config-kulcs: %s (%s)" % (k, CONFIG_F))
+            raise SystemExit("pr_gomb: missing config key: %s (%s)" % (k, CONFIG_F))
     c["owner_id"] = int(c["owner_id"])
     return c
 
@@ -127,7 +127,7 @@ def _pr(repo, n):
     oth = [x for x in (rv if st2 == 200 else []) if x["user"]["login"] != me]
     return {"repo": repo, "pr": n, "title": p["title"], "head": p["head"]["sha"], "base": p["base"]["ref"],
             "state": p["state"], "mergeable_state": p.get("mergeable_state"),
-            "review": (oth[-1]["state"] if oth else "nincs review mástól")}, None
+            "review": (oth[-1]["state"] if oth else "no review from others")}, None
 
 
 def kerd(repo, n, proba=False):
@@ -136,22 +136,22 @@ def kerd(repo, n, proba=False):
         print("pr_gomb: REJECT — %s" % err)
         return 2
     rid = hashlib.sha256(("%s#%d@%s@%d" % (repo, n, pr["head"], int(time.time()))).encode()).hexdigest()[:8]
-    text = ("MERGE-DÖNTÉS %s\n%s #%d — %s\nág: %s\nfej: %s\nállapot: %s · review: %s\n\n"
-            "A gomb a MERGE maga (merge-commit), a FENTI fejhez kötve. Ha a fej közben változik, vagy a platform "
-            "feltétele hiányzik (pl. a másik fél jóváhagyása), NEM fut le, hanem megmondja, miért."
+    text = ("MERGE DECISION %s\n%s #%d — %s\nbranch: %s\nhead: %s\nstate: %s · review: %s\n\n"
+            "The button is the MERGE itself (merge commit), bound to the head ABOVE. If the head changes meanwhile, or a platform "
+            "condition is missing (e.g. the other party's approval), it does NOT run, but says why."
             % (rid, repo, n, pr["title"][:80], pr["base"], pr["head"][:12], pr["mergeable_state"], pr["review"]))
     kb = {"inline_keyboard": [[{"text": "MERGE ✅", "callback_data": "M:" + rid},
-                               {"text": "NEM ❌", "callback_data": "N:" + rid}]]}
+                               {"text": "NO ❌", "callback_data": "N:" + rid}]]}
     if proba:
-        print("[PRÓBA — nem küld, nem ír könyvet]\n" + text + "\n" + json.dumps(kb, ensure_ascii=False))
+        print("[TRIAL — does not send, does not write the ledger]\n" + text + "\n" + json.dumps(kb, ensure_ascii=False))
         return 0
     out = _tg("sendMessage", {"chat_id": _read(cfg()["telegram_chat_id_file"]), "text": text, "reply_markup": kb})
     if not out.get("ok"):
-        print("pr_gomb: a kérés NEM ment ki (%s) — könyvbe sem került, hogy ne legyen függő kérés gomb nélkül"
-              % ("Telegram KIKAPCSOLVA" if out.get("disabled") else out))
+        print("pr_gomb: the request did NOT go out (%s) — it was not written to the ledger either, so there is no pending request without a button"
+              % ("Telegram DISABLED" if out.get("disabled") else out))
         return 1
     _append(KERELMEK, {"id": rid, "ts": int(time.time()), **pr, "message_id": out["result"]["message_id"]})
-    print("pr_gomb: kérés kiment, id=%s (%s #%d @ %s)" % (rid, repo, n, pr["head"][:12]))
+    print("pr_gomb: request sent, id=%s (%s #%d @ %s)" % (rid, repo, n, pr["head"][:12]))
     return 0
 
 
@@ -172,21 +172,21 @@ def feldolgoz():
         act, _, rid = data.partition(":")
         rec = {"ts": int(time.time()), "id": rid, "valasz": data, "from_id": v.get("from_id")}
         if v.get("from_id") != owner:
-            rec.update(eredmeny="FIGYELMEN KIVUL: nem az operátor kattintott")
+            rec.update(eredmeny="IGNORED: the click was not the operator's")
             _append(DONTESEK, rec)
             continue
         k = kerelmek.get(rid)
         if not k:
-            rec.update(eredmeny="ISMERETLEN kérés-id")
+            rec.update(eredmeny="UNKNOWN request id")
             _append(DONTESEK, rec)
             continue
         if _decided(rid):
-            _tg("sendMessage", {"chat_id": owner, "text": "Ez a kérés (%s) már el van döntve." % rid})
+            _tg("sendMessage", {"chat_id": owner, "text": "This request (%s) is already decided." % rid})
             continue
         if act == "N":
-            rec.update(eredmeny="NEM — kimondott elutasítás (harmadik állapot: nem csend)")
+            rec.update(eredmeny="NO — a stated rejection (a third state: not silence)")
             _append(DONTESEK, rec)
-            _tg("sendMessage", {"chat_id": owner, "text": "Rögzítve: NEM — %s #%d nem megy be." % (k["repo"], k["pr"])})
+            _tg("sendMessage", {"chat_id": owner, "text": "Recorded: NO — %s #%d does not go in." % (k["repo"], k["pr"])})
             continue
         if act != "M":
             rec.update(eredmeny="ISMERETLEN gomb-adat")
@@ -194,19 +194,19 @@ def feldolgoz():
             continue
         pr, err = _pr(k["repo"], k["pr"])
         if err:
-            rec.update(eredmeny="NEM FUTOTT: " + err)
+            rec.update(eredmeny="DID NOT RUN: " + err)
             _append(DONTESEK, rec)
-            _tg("sendMessage", {"chat_id": owner, "text": "NEM futott le: %s" % err})
+            _tg("sendMessage", {"chat_id": owner, "text": "Did NOT run: %s" % err})
             continue
         if pr["head"] != k["head"]:
-            rec.update(eredmeny="NEM FUTOTT: a fej változott %s -> %s (a döntés a KÉRÉSKORI fejhez kötött; kérj újat)"
+            rec.update(eredmeny="DID NOT RUN: the head changed %s -> %s (the decision is bound to the head AT REQUEST TIME; make a new request)"
                        % (k["head"][:12], pr["head"][:12]))
             _append(DONTESEK, rec)
             _tg("sendMessage", {"chat_id": owner, "text": rec["eredmeny"]})
             continue
         st, out = _gh("PUT", "https://api.github.com/repos/%s/%s/pulls/%d/merge" % (org, k["repo"], k["pr"]),
                       {"merge_method": "merge", "sha": k["head"],
-                       "commit_title": "Merge PR #%d (%s) — operátor Telegram-döntés %s" % (k["pr"], k["repo"], rid)})
+                       "commit_title": "Merge PR #%d (%s) — operator Telegram decision %s" % (k["pr"], k["repo"], rid)})
         if st == 200 and out.get("merged"):
             rec.update(eredmeny="MERGE OK", merge_sha=out.get("sha"))
             _append(DONTESEK, rec)
@@ -214,10 +214,10 @@ def feldolgoz():
                                 % (k["repo"], k["pr"], (out.get("sha") or "")[:12])})
         else:
             why = out.get("message") or str(out)
-            rec.update(eredmeny="NEM FUTOTT (GitHub %s): %s" % (st, why))
+            rec.update(eredmeny="DID NOT RUN (GitHub %s): %s" % (st, why))
             _append(DONTESEK, rec)
-            _tg("sendMessage", {"chat_id": owner, "text": "NEM futott le a merge (%s #%d): %s — a gomb nem kerüli meg a "
-                                                          "platform feltételeit." % (k["repo"], k["pr"], why)})
+            _tg("sendMessage", {"chat_id": owner, "text": "The merge did NOT run (%s #%d): %s — the button does not bypass the "
+                                                          "platform's conditions." % (k["repo"], k["pr"], why)})
     open(OFFSET_F, "w").write(str(len(valaszok)))
     return 0
 
@@ -226,7 +226,7 @@ def allapot():
     d = {x["id"] for x in _rows(DONTESEK)}
     for k in _rows(KERELMEK):
         print("%-8s %-14s #%-3d %-12s %s" % (k["id"], k["repo"], k["pr"], k["head"][:12],
-                                             "ELDÖNTVE" if k["id"] in d else "FÜGGŐ"))
+                                             "DECIDED" if k["id"] in d else "PENDING"))
     return 0
 
 

@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Termék-módban a JSON-tükör NEM kikényszerített csatorna → megtagadjuk (rc=3).
-# Az env bármely nem-dev értéke, vagy a bus_enforce szerinti product mód (marker a DB mellett / /etc alatt) elég.
+# In product mode the JSON mirror is NOT an enforced channel → we refuse (rc=3).
+# Any non-dev value of the env, or product mode per bus_enforce (a marker next to the DB / under /etc) is enough.
 _mode="$(printf '%s' "${AGENT_BUS_MODE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 _here="$(cd "$(dirname "$0")/.." && pwd)"
 if { [ -n "$_mode" ] && [ "$_mode" != "dev" ]; } || \
    python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import bus_enforce as e; sys.exit(0 if e.mode() == "product" else 1)' "$_here" 2>/dev/null; then
-  echo "inbox_watch_filtered: TERMEK-MOD — a JSON-tukor nem ellenorzott csatorna; hasznald: agent_bus.py recv --agent <agent>" >&2
+  echo "inbox_watch_filtered: PRODUCT MODE — the JSON mirror is not a checked channel; use: agent_bus.py recv --agent <agent>" >&2
   exit 3
 fi
-# PÉLDA: szűrt busz-figyelő egy koordinátor-szerepű agentnek.
-# A közös tools/inbox_watch.sh MINDEN üzenetre ébreszt — ha sok a rutin őr-riasztás, az éjjel-nappal
-# ébresztget és tokent éget.
+# EXAMPLE: a filtered bus watcher for an agent in a coordinator role.
+# The shared tools/inbox_watch.sh wakes on EVERY message — if there are many routine guard alerts, it keeps waking
+# day and night and burns tokens.
 #
-# Ez a változat CSAK ezekre ébreszt (stdout = Monitor-esemény):
-#   1) társ-agent jelentése: from ∈ $WATCH_PEERS ÉS kind ∉ {alert, riasztas}
-#   2) kiemelt feladó: from = $WATCH_PRIORITY_SENDER
-#   3) valódi vészhelyzet-riasztás: a topicban/törzsben KRITIKUS jel (kulcs/szivárgás/lemez/OOM/backup-hiba/kvóta-stop)
-# Minden más riasztás NEM ébreszt, hanem a digestbe megy — semmi nem vész el, csak nem ébreszt.
-# Szabd testre: AGENT=<a te agent-neved>, WATCH_PEERS="a,b,c", WATCH_PRIORITY_SENDER=<feladó>.
+# This variant wakes ONLY for these (stdout = a Monitor event):
+#   1) a peer agent's report: from ∈ $WATCH_PEERS AND kind ∉ {alert, riasztas}
+#   2) a priority sender: from = $WATCH_PRIORITY_SENDER
+#   3) a real emergency alert: a CRITICAL signal in the topic/body (key/leak/disk/OOM/backup failure/quota stop)
+# Every other alert does NOT wake, but goes into the digest — nothing is lost, it just does not wake.
+# Customize: AGENT=<your agent name>, WATCH_PEERS="a,b,c", WATCH_PRIORITY_SENDER=<sender>.
 BRIDGE="${AGENT_BRIDGE_DIR:-$HOME/.agentbus}"
 AGENT="${AGENT:-$(basename "$PWD")}"
 WATCH_PEERS="${WATCH_PEERS:-}"
@@ -40,15 +40,15 @@ priority_sender = (sys.argv[4] if len(sys.argv) > 4 else "").strip().lower()
 try:
     d = json.load(open(f))
 except Exception:
-    print("EMIT|BUS-MSG: %s (OLVASHATATLAN JSON)" % f); sys.exit()
+    print("EMIT|BUS-MSG: %s (UNREADABLE JSON)" % f); sys.exit()
 frm = (d.get('from') or d.get('sender') or '?').lower()
 kind = (d.get('kind') or '').lower()
 sub = d.get('topic') or d.get('subject') or d.get('title') or ''
 body = d.get('note') or d.get('body') or ''
 if not sub:
-    sub = '[targy nelkul] ' + next((l.strip() for l in body.splitlines() if l.strip()), '')[:110]
+    sub = '[no subject] ' + next((l.strip() for l in body.splitlines() if l.strip()), '')[:110]
 CRIT = re.compile(r'kulcs.?szivar|key.?leak|leak-scan.*talalat|szivarog|disk.?(full|tele)|no space|oom|backup.?(fail|hiba)|kvota.?(stop|80)|quota.?exhaust.*all', re.I)
-is_alert = kind in ('alert', 'riasztas') or bool(re.search(r'health-cron|FAIL-LOUD|RED-TEAM|freshness|anti-masking', sub, re.I))  # a gépi őr-üzenetek is riasztásnak számítanak -> digest
+is_alert = kind in ('alert', 'riasztas') or bool(re.search(r'health-cron|FAIL-LOUD|RED-TEAM|freshness|anti-masking', sub, re.I))  # machine guard messages also count as alerts -> digest
 line = "%s | %s%s" % (frm, ('[%s] ' % kind) if kind and kind not in ('report', 'info') else '', sub)
 if (priority_sender and frm == priority_sender) or (frm in peers and not is_alert) or CRIT.search(sub + ' ' + body[:400]):
     print("EMIT|BUS-MSG: " + line)

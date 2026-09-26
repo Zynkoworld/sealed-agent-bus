@@ -1,48 +1,48 @@
-# pr_gomb — merge-döntés Telegram-gombbal (az emberi kulcs a KET_EMBER_KULCS szabályban)
+# pr_gomb — a merge decision with a Telegram button (the human key in the KET_EMBER_KULCS rule)
 
-**Kinek:** annak az operátornak, akinek a saját oldalán kell egy EMBERI kulcs a PR-merge-hez — Telegramon, egy
-kattintással, úgy, hogy a gomb SEMMIT nem kerül meg a GitHub branch-védelméből. A Zynko-oldalon ez fut 2026-09-17 óta
-(az operátor kulcsával); ez a csomag ugyanaz, titkok és személyes azonosítók nélkül, config-fájlból paraméterezve.
+**For whom:** an operator who needs a HUMAN key for PR merges on their own side — on Telegram, with one
+click, in a way that the button bypasses NOTHING of GitHub's branch protection. On the Zynko side this has run since 2026-09-17
+(with the operator's key); this package is the same, without secrets and personal identifiers, parameterized from a config file.
 
-## Mit csinál
+## What it does
 
-1. `pr_gomb.py kerd <repo> <pr>` → egy PR-kártya megy az operátor privát chatjébe a bottal:
-   cím, ág, **fej-SHA**, `mergeable_state`, a másik fél review-ja, és két gomb: **[MERGE ✅] [NEM ❌]**.
-   A kérés az append-only `kerelmek.jsonl`-be kerül (id, fej-SHA, message_id).
-2. A gombnyomás `callback_query`-ként érkezik a bothoz. A `telegram_gomb_poll.py` (vagy a saját pollered) a
-   `valaszok.jsonl`-be írja (from_id, data, ts), és nyugtázza. **A poller nem dönt.**
-3. `pr_gomb.py feldolgoz` (cron, percenként) végigmegy az új válaszokon:
-   * nem az operátor kattintott → rögzítve, figyelmen kívül;
-   * `NEM` → rögzítve, kimondott elutasítás (harmadik állapot, nem csend), visszajelzés Telegramon;
-   * `MERGE` → újra lekéri a PR-t; ha a **fej változott** a kérés óta → NEM futtatja, megmondja; különben
-     `PUT /pulls/{n}/merge` **merge-commit** móddal, a kéréskori `sha`-hoz kötve. Ha a GitHub visszautasítja
-     (hiányzó kötelező review, piros check, védett ág) → „NEM futott le: <ok>" — a gomb **nem kerüli meg** a platformot.
-   * minden döntés a `dontesek.jsonl`-be (append-only). Egy kérés egyszer dönthető el.
+1. `pr_gomb.py kerd <repo> <pr>` → a PR card goes to the operator's private chat with the bot:
+   title, branch, **head SHA**, `mergeable_state`, the other party's review, and two buttons: **[MERGE ✅] [NO ❌]**.
+   The request goes into the append-only `kerelmek.jsonl` (id, head SHA, message_id).
+2. The button press arrives at the bot as a `callback_query`. `telegram_gomb_poll.py` (or your own poller) writes it into
+   `valaszok.jsonl` (from_id, data, ts), and acknowledges it. **The poller does not decide.**
+3. `pr_gomb.py feldolgoz` (cron, every minute) goes through the new replies:
+   * the click was not the operator's → recorded, ignored;
+   * `NO` → recorded, a stated rejection (a third state, not silence), feedback on Telegram;
+   * `MERGE` → fetches the PR again; if the **head changed** since the request → does NOT run it, says so; otherwise
+     `PUT /pulls/{n}/merge` in **merge-commit** mode, bound to the `sha` at request time. If GitHub refuses
+     (a missing required review, a red check, a protected branch) → "Did NOT run: <reason>" — the button **does not bypass** the platform.
+   * every decision goes into `dontesek.jsonl` (append-only). A request can be decided once.
 
-## Mit NEM csinál (kimondva)
+## What it does NOT do (stated)
 
-* Nem ad review-t/approve-ot (a PR szerzője a GitHubon nem hagyhatja jóvá a sajátját). A gomb = a merge maga.
-* Nem squash-ol, nem rebase-el: a base-pin horgonyok a merge-commit SHA-jára mutatnak.
-* Nem kerüli meg a fej-változást: a döntés a KÉRÉSKORI fejhez kötött, új fejhez új kérés kell.
-* Nem töröl semmit: mindhárom könyv append-only.
-* Nem ír tokent naplóba.
+* It does not give a review/approve (the PR's author cannot approve their own on GitHub). The button = the merge itself.
+* It does not squash, does not rebase: the base-pin anchors point to the merge commit's SHA.
+* It does not bypass a head change: the decision is bound to the head AT REQUEST TIME, a new head needs a new request.
+* It deletes nothing: all three ledgers are append-only.
+* It does not write a token into the log.
 
-## Telepítés (5 perc)
+## Installation (5 minutes)
 
-1. Bot: `@BotFather` → új bot → token → fájlba (`telegram_bot_token_file`, 0600). Írj a botnak egy üzenetet a saját
-   fiókodból, és olvasd ki a `chat.id`-t + a saját `from.id`-det (pl. `getUpdates`): ez a `telegram_chat_id_file`
-   tartalma és az `owner_id`.
-2. GitHub: fine-grained vagy classic token `repo` joggal a cél-repókra → fájlba (`github_token_file`, 0600). A token
-   tulajdonosának **merge joga** legyen, de a branch-védelem (kötelező review a másik féltől) rá is áll — ez a lényeg.
-3. `cp config.example.json config.json`, töltsd ki. `owner_id` = a TE Telegram user-id-d (integer).
-4. Próba küldés nélkül: `python3 pr_gomb.py kerd <repo> <pr> --proba` — kiírja a kártyát, nem küld, nem ír könyvet.
-5. Cron: `crontab.example` két sora (útvonalakat átírva). Ha már van saját pollered ugyanazzal a bot-tokennel,
-   lásd lent, és csak a 2. sort tedd be.
+1. Bot: `@BotFather` → new bot → token → into a file (`telegram_bot_token_file`, 0600). Send the bot a message from your own
+   account, and read out the `chat.id` + your own `from.id` (e.g. `getUpdates`): that is the content of `telegram_chat_id_file`
+   and the `owner_id`.
+2. GitHub: a fine-grained or classic token with `repo` rights on the target repos → into a file (`github_token_file`, 0600). The token's
+   owner should have **merge rights**, but branch protection (a required review from the other party) applies to them too — that is the point.
+3. `cp config.example.json config.json`, fill it in. `owner_id` = YOUR Telegram user id (integer).
+4. A trial without sending: `python3 pr_gomb.py kerd <repo> <pr> --proba` — prints the card, does not send, does not write the ledger.
+5. Cron: the two lines of `crontab.example` (with the paths rewritten). If you already have your own poller with the same bot token,
+   see below, and add only line 2.
 
-## Meglévő poller
+## Existing poller
 
-A `getUpdates` offset botonként közös, ezért egy bot-tokenhez EGY poller fusson. Ha már van, ezt tedd bele
-(ugyanaz, mint a `telegram_gomb_poll.py` magja):
+The `getUpdates` offset is shared per bot, so ONE poller should run per bot token. If you already have one, put this in it
+(the same as the core of `telegram_gomb_poll.py`):
 
 ```python
 cq = u.get("callback_query")
@@ -50,17 +50,17 @@ if cq:
     with open(VALASZOK, "a", encoding="utf-8") as f:
         f.write(json.dumps({"update_id": uid, "from_id": (cq.get("from") or {}).get("id"),
                             "data": cq.get("data"), "callback_query_id": cq.get("id"), "ts": int(time.time())}) + "\n")
-    _tg("answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": "Megkaptam, feldolgozom."})
+    _tg("answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": "Received, processing."})
 ```
 
-## Kikapcsolás
+## Switching off
 
-Fájllal, nem kóddal: hozd létre a `disabled_marker` fájlt → a bot nem küld, a poller nem kérdez; `rm` = vissza.
+With a file, not with code: create the `disabled_marker` file → the bot does not send, the poller does not ask; `rm` = back on.
 
-## Miért így (a Zynko-oldali tanulságok)
+## Why this way (lessons from the Zynko side)
 
-* **Két ember kulcsa.** A két-kulcsos szabály agentekre osztva nulla kulcsot ad (mindkét agent az emberhez utal).
-  Ezért az egyik kulcs az operátor gombja, a másik a másik fél GitHub-review-ja — a platform kényszeríti ki.
-* **A fejhez kötött döntés.** Egy „igen" csak arra a bájtsorra áll, amit az operátor látott.
-* **Harmadik állapot.** A „NEM" és a „nem futott le, mert…" külön rögzül; a csend nem döntés.
-* **Append-only.** A könyv audit, nem állapot: utólag látszik, ki mikor mit döntött, és mi lett belőle.
+* **Two humans' keys.** The two-key rule assigned to agents gives zero keys (both agents refer to the human).
+  So one key is the operator's button, the other is the other party's GitHub review — the platform enforces it.
+* **A decision bound to the head.** A "yes" only applies to the byte sequence the operator saw.
+* **A third state.** "NO" and "did not run, because…" are recorded separately; silence is not a decision.
+* **Append-only.** The ledger is an audit, not a state: afterwards it shows who decided what when, and what came of it.
