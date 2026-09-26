@@ -1,7 +1,7 @@
 {
  "built": {
   "python": "3.11.15",
-  "utc": "2026-09-26T19:40:59Z"
+  "utc": "2026-09-26T19:46:09Z"
  },
  "file_count": 151,
  "files": {
@@ -54,7 +54,7 @@
   "product/make_provenance.py": "37159749015e01270e0fdf253c3349f68c486402bdddfca6f5f5a7b1f8dd1e58",
   "product/make_release.py": "050229a32d378f9cddad896ec3ffb2436bff68d8ac0c91a9b858de6ab5860ec1",
   "product/make_release_page.py": "1c6416955372211a501d056c2946e99b7268fd429e8fb72be341944c5d5b6ea2",
-  "product/provenance.json": "9667de379650520fb8bd751b249994477a610eae922b8b7c5b81a9edb507329d",
+  "product/provenance.json": "1b6f0aa115cc5ab7ebab1bbeac4d061c211fe4e5d433145e0c2991a3bd88f7e9",
   "product/release_preflight.py": "70eaaa9ac4a10ff115b3abdea6890ad5e2b4174c30d33565810b8d88a0420ae2",
   "product/test_product_evidence.py": "69fc66bf926d9ea74f964f6901b17269a5abe855d088cd610c0e6885d241e9d9",
   "product/test_product_packaging.py": "6c3e21c874d63a9807e4c4779bbfc6fefb1d73796803319c60d2c4f033189d96",
@@ -159,14 +159,14 @@
  },
  "product": "sealed-bus",
  "provenance": {
-  "content_digest": "c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987",
+  "content_digest": "1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636",
   "content_digest_recipe": "sha256 over one line per sealed file — \"<sha256 of the file>  <path>\\n\" — sorted by path: i.e. the bytes of `sha256sum` output for the sealed files, hashed again. By hand from the tree root: sha256sum $(the sealed paths) | LC_ALL=C sort -k2 | sha256sum",
   "unverifiable_in_public": [
    {
     "covered_instead_by": "content_digest",
     "field": "source_commit",
     "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` cannot resolve it — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
-    "value": "c63d74882a2d824167b0c3827040e71e524e2882"
+    "value": "f8310c5e413c081eb92553f9dd4dc160948046b3"
    },
    {
     "covered_instead_by": "nothing — stated as an unchecked claim",
@@ -197,9 +197,9 @@
    "version"
   ]
  },
- "source_commit": "c63d74882a2d824167b0c3827040e71e524e2882",
- "suite": "751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.78s",
- "suite_first_pass": "4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 53.65s",
+ "source_commit": "f8310c5e413c081eb92553f9dd4dc160948046b3",
+ "suite": "751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.67s",
+ "suite_first_pass": "4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 54.16s",
  "suite_runner": "-m pytest -q -p no:cacheprovider",
  "version": "1.5.6"
 }

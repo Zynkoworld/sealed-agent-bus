@@ -2,6 +2,6 @@ claim: A delivery the transport accepted but the receiving side never processed 
 tests: test_silent_processing_gap.py
 peer_written: False
 mutation: {"file": "agent_bus.py", "find": "        for mid in sorted(set(at) - done):", "replace": "        for mid in sorted(set()):  # MUTATION: an unprocessed delivery is never reported"}
-baseline rc=0 .............                                                            [100%] | 13 passed in 0.75s
-mutated  rc=1 FAILED test_silent_processing_gap.py::ProcessingGap::test_the_transport_sees_nothing_wrong_which_is_the_whole_point | 6 failed, 7 passed in 0.56s
+baseline rc=0 .............                                                            [100%] | 13 passed in 0.72s
+mutated  rc=1 FAILED test_silent_processing_gap.py::ProcessingGap::test_the_transport_sees_nothing_wrong_which_is_the_whole_point | 6 failed, 7 passed in 0.52s
 status: OK (green with the guard; 6 test(s) decided against it without it)

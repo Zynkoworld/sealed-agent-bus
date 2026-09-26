@@ -26,7 +26,7 @@ self = <test_product_evidence.ShippedEnvelope testMethod=test_quick_verify_passe
 E       AssertionError: 'FAIL' != 'OK'
 E       - FAIL
 E       + OK
-E        : {'chapter': '1. integrity', 'status': 'FAIL', 'detail': 'product/README.md: content differs from the manifest; product/_notary_probe.py: content differs from the manifest; product/make_evidence.py: content differs from the manifest; MANIFEST.json:content_digest: the content digest re-derived from the shipped bytes is c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987, the manifest claims 21c1b72c5eae45b801d2a169e822e7e046312f8f8e7a298fd842d0026a118e4a', 'problems': [{'file': 'product/README.md', 'problem': 'content differs from the manifest'}, {'file': 'product/_notary_probe.py', 'problem': 'content differs from the manifest'}, {'file': 'product/make_evidence.py', 'problem': 'content differs from the manifest'}, {'file': 'MANIFEST.json:content_digest', 'problem': 'the content digest re-derived from the shipped bytes is c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987, the manifest claims 21c1b72c5eae45b801d2a169e822e7e046312f8f8e7a298fd842d0026a118e4a'}], 'unsealed': ['README.md', 'SECURITY.md', 'assets/sab.png'], 'content_digest': 'c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987', 'content_digest_recipe': 'sha256 over one line per sealed file — "<sha256 of the file>  <path>\\n" — sorted by path: i.e. the bytes of `sha256sum` output for the sealed files, hashed again. By hand from the tree root: sha256sum $(the sealed paths) | LC_ALL=C sort -k2 | sha256sum', 'not_verifiable_in_public': ["source_commit: NOT verifiable in public (a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` answers 'bad object' — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.) — covered instead by: content_digest", "built: NOT verifiable in public (the build machine's Python version and UTC clock. Nothing in the archive can attest to either; a reader can only see what the seller wrote down.) — covered instead by: nothing — stated as an unchecked claim", 'suite: NOT verifiable in public (the test-suite line MEASURED ON THE BUILD MACHINE. It is re-runnable with the runner named in suite_runner, but the numbers depend on the machine (the key-registry guard needs a root-owned registry, so a non-root run legitimately reds ~26 tests) — so a reader reproducing a different line has not caught a lie.) — covered instead by: nothing — stated as an unchecked claim', 'suite_first_pass: NOT verifiable in public (the same, for the pass measured against the PREVIOUS envelope — a build-machine record.) — covered instead by: nothing — stated as an unchecked claim', 'suite_runner: NOT verifiable in public (a statement about HOW the build machine ran the suite; the archive cannot attest to it.) — covered instead by: nothing — stated as an unchecked claim']}
+E        : {'chapter': '1. integrity', 'status': 'FAIL', 'detail': 'product/provenance.json: content differs from the manifest; MANIFEST.json:content_digest: the content digest re-derived from the shipped bytes is 1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636, the manifest claims c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987', 'problems': [{'file': 'product/provenance.json', 'problem': 'content differs from the manifest'}, {'file': 'MANIFEST.json:content_digest', 'problem': 'the content digest re-derived from the shipped bytes is 1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636, the manifest claims c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987'}], 'unsealed': ['README.md', 'SECURITY.md', 'assets/sab.png'], 'content_digest': '1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636', 'content_digest_recipe': 'sha256 over one line per sealed file — "<sha256 of the file>  <path>\\n" — sorted by path: i.e. the bytes of `sha256sum` output for the sealed files, hashed again. By hand from the tree root: sha256sum $(the sealed paths) | LC_ALL=C sort -k2 | sha256sum', 'not_verifiable_in_public': ['source_commit: NOT verifiable in public (a commit of the BUILD repository. The public repository is a squash export, so this object is not in it and `git cat-file` cannot resolve it — measured by an independent arm on the published v1.5.1. It is kept because dropping it would hide the gap, not close it.) — covered instead by: content_digest', "built: NOT verifiable in public (the build machine's Python version and UTC clock. Nothing in the archive can attest to either; a reader can only see what the seller wrote down.) — covered instead by: nothing — stated as an unchecked claim", 'suite: NOT verifiable in public (the test-suite line MEASURED ON THE BUILD MACHINE. It is re-runnable with the runner named in suite_runner, but the numbers depend on the machine (the key-registry guard needs a root-owned registry, so a non-root run legitimately reds ~26 tests) — so a reader reproducing a different line has not caught a lie.) — covered instead by: nothing — stated as an unchecked claim', 'suite_first_pass: NOT verifiable in public (the same, for the pass measured against the PREVIOUS envelope — a build-machine record.) — covered instead by: nothing — stated as an unchecked claim', 'suite_runner: NOT verifiable in public (a statement about HOW the build machine ran the suite; the archive cannot attest to it.) — covered instead by: nothing — stated as an unchecked claim']}
 
 product/test_product_evidence.py:110: AssertionError
 _________ ShippedProvenance.test_the_shipped_manifest_provenance_holds _________
@@ -35,18 +35,18 @@ self = <test_product_evidence.ShippedProvenance testMethod=test_the_shipped_mani
 
     def test_the_shipped_manifest_provenance_holds(self):
 >       self.assertEqual(ev.check_public_provenance(TREE, self.man), [])
-E       AssertionError: Lists differ: [{'file': 'MANIFEST.json:content_digest', [216 chars]4a'}] != []
+E       AssertionError: Lists differ: [{'file': 'MANIFEST.json:content_digest', [216 chars]87'}] != []
 E       
 E       First list contains 1 additional elements.
 E       First extra element 0:
-E       {'file': 'MANIFEST.json:content_digest', 'problem': 'the content digest re-derived from the shipped bytes is c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987, the manifest claims 21c1b72c5eae45b801d2a169e822e7e046312f8f8e7a298fd842d0026a118e4a'}
+E       {'file': 'MANIFEST.json:content_digest', 'problem': 'the content digest re-derived from the shipped bytes is 1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636, the manifest claims c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987'}
 E       
 E       + []
 E       - [{'file': 'MANIFEST.json:content_digest',
 E       -   'problem': 'the content digest re-derived from the shipped bytes is '
-E       -              'c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987, '
+E       -              '1ef5bade03cdf9c187e3fe82a482a327e5fe3fada7daf0384ab6538e0118d636, '
 E       -              'the manifest claims '
-E       -              '21c1b72c5eae45b801d2a169e822e7e046312f8f8e7a298fd842d0026a118e4a'}]
+E       -              'c77e3a3edb92a4ceb5f35b301e6d3a58af15f7ec3abe7442256657f64a993987'}]
 
 product/test_product_evidence.py:255: AssertionError
 _ ReleasePage.test_page_carries_the_artifact_identity_and_regenerates_identically _
@@ -59,7 +59,7 @@ self = <test_product_page.ReleasePage testMethod=test_page_carries_the_artifact_
         tree, dist = self.tree_with_suite("280 passed, 1 skipped in 34.68s", t.name)
         p = self.gen(dist=dist, tree=tree)
 >       self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-E       AssertionError: 1 != 0 : the evidence envelope does not describe the shipped tree: product/README.md: content differs from the manifest; product/_notary_probe.py: content differs from the manifest; product/make_evidence.py: content differs from the manifest
+E       AssertionError: 1 != 0 : the evidence envelope does not describe the shipped tree: product/provenance.json: content differs from the manifest
 
 product/test_product_page.py:67: AssertionError
 _________ ReleasePage.test_the_published_page_carries_nothing_internal _________
@@ -81,7 +81,7 @@ FAILED product/test_product_evidence.py::ShippedEnvelope::test_quick_verify_pass
 FAILED product/test_product_evidence.py::ShippedProvenance::test_the_shipped_manifest_provenance_holds
 FAILED product/test_product_page.py::ReleasePage::test_page_carries_the_artifact_identity_and_regenerates_identically
 FAILED product/test_product_page.py::ReleasePage::test_the_published_page_carries_nothing_internal
-4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 53.65s
+4 failed, 748 passed, 1 skipped, 2 xfailed, 98 subtests passed in 54.16s
 
 
 second pass (with the finished envelope):
@@ -96,4 +96,4 @@ second pass (with the finished envelope):
 ...........................................................................................s...................... [ 85%]
 ................................................... [ 91%]
 .............................................................            [100%]
-751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.78s
+751 passed, 2 skipped, 2 xfailed, 98 subtests passed in 55.67s
