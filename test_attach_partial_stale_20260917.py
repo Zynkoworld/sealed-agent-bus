@@ -1,17 +1,17 @@
-"""Elárvult félkész csatolmány-átvitel — (2026-09-17, KÖZEPES).
+"""An orphaned half-finished attachment transfer — (2026-09-17, MEDIUM).
 
-A lelet: a `receive_chunk` félkész állapotát csak a tartalom sha256-a címzi (feladóhoz nem kötött), a következő
-darab sorszámát egy közös számláló adja, és nem volt belőle visszaút: TTL, lejárat, reset/abort API egyik sem. Egy
-BEFEJEZETLENÜL hagyott félkész állapot (pont egy megszakadt SSH-kör, amit a v1.2 fejléce elviselni ígér) után
-ugyanannak a tartalomnak MINDEN későbbi feltöltése `chunk out of order: expected seq 1, got 0`-val bukott — a
-becsületes feladó önerőből nem tudott visszaállni. az egyik kar pontosítása: a párhuzamos, egymásba fonódó becsületes
-feltöltés HELYREÁLL (a dedupe-ág a lezáró darabra sikert ad); a tartós blokk kizárólag az elárvult állapotból jön.
+The finding: the half-finished state of `receive_chunk` is addressed only by the content's sha256 (not bound to a sender), the next
+chunk's number comes from a shared counter, and there was no way back: no TTL, expiry, or reset/abort API. After a
+half-finished state LEFT UNFINISHED (exactly a broken SSH round, which the v1.2 header promises to tolerate)
+EVERY later upload of the same content failed with `chunk out of order: expected seq 1, got 0` — the
+honest sender could not recover on its own. One arm's clarification: a parallel, interleaved honest
+upload DOES RECOVER (the dedupe branch gives success for the closing chunk); the lasting block comes only from the orphaned state.
 
-A javítás: egy seq-0 darab újraindítja az átvitelt, ha a félkész állapot ELÁRVULT (az utolsó darab óta
-`PARTIAL_STALE_S` tétlenség). Élő átvitelt seq-0 nem söpör el (két becsületes feladó nem lökdösi egymást). No-deletion:
-az elárvult munkafájl `.partial.abandoned.<ts>` néven félre kerül, és a kvótába beleszámít.
+The fix: a seq-0 chunk restarts the transfer if the half-finished state is ORPHANED (`PARTIAL_STALE_S` of inactivity
+since the last chunk). A seq-0 does not sweep away a live transfer (two honest senders do not push each other). No-deletion:
+the orphaned work file is moved aside as `.partial.abandoned.<ts>`, and counts towards the quota.
 
-Mutáns-próba: az újraindító ág nélkül `test_stale_partial_is_restarted_by_seq0` bukik. stdlib unittest, izolált tár.
+Mutant probe: without the restarting branch `test_stale_partial_is_restarted_by_seq0` fails. stdlib unittest, an isolated store.
 """
 import os
 import sys
@@ -45,21 +45,21 @@ class AbandonedPartial(unittest.TestCase):
         os.utime(self._meta(), (old, old))
 
     def _abandon(self):
-        self.assertIsNone(self.dst.receive_chunk(self.desc, self.chunks[0]))      # seq 0 megjött, aztán semmi
+        self.assertIsNone(self.dst.receive_chunk(self.desc, self.chunks[0]))      # seq 0 arrived, then nothing
 
-    # ── a lelet: elárvult félkész állapot → korábban örök blokk ──────────────────────────────
+    # ── the finding: an orphaned half-finished state → previously an eternal block ──────────────────────────────
     def test_fresh_partial_is_not_swept_by_a_seq0(self):
         self._abandon()
         with self.assertRaises(att.AttachmentError) as cm:
             self.dst.receive_chunk(self.desc, self.chunks[0])
         self.assertIn("in progress", str(cm.exception))
         self.assertIn("expected seq 1, got 0", str(cm.exception))
-        self.assertIn("idle", str(cm.exception))                                 # a visszaút KIMONDVA a hibában
+        self.assertIn("idle", str(cm.exception))                                 # the way back STATED in the error
 
     def test_stale_partial_is_restarted_by_seq0(self):
         self._abandon()
         self._age(att.PARTIAL_STALE_S + 1)
-        # háromszor egymás után bukott; most a seq-0 újraindít, és a teljes átvitel TÁROLVA
+        # it failed three times in a row; now the seq-0 restarts, and the whole transfer is STORED
         self.assertIsNone(self.dst.receive_chunk(self.desc, self.chunks[0]))
         self.assertIsNone(self.dst.receive_chunk(self.desc, self.chunks[1]))
         self.assertEqual(self.dst.receive_chunk(self.desc, self.chunks[2]), self.desc)
@@ -74,15 +74,15 @@ class AbandonedPartial(unittest.TestCase):
         aband = [n for n in names if ".partial.abandoned." in n and not n.endswith(".json") and ".json." not in n]
         self.assertEqual(len(aband), 1, names)
         st = self.dst.work_stats()
-        self.assertEqual(st["files"], 2, st)                                     # az elárvult + az élő .partial
-        self.assertEqual(st["bytes"], 2 * att.CHUNK_BYTES, st)                   # mindkettő egy-egy darab
+        self.assertEqual(st["files"], 2, st)                                     # the orphaned + the live .partial
+        self.assertEqual(st["bytes"], 2 * att.CHUNK_BYTES, st)                   # each is one chunk
 
     def test_control_honest_transfer_and_interleaving_recover(self):
-        # bolygatatlan út: 3 darab → TÁROLVA (a szonda nem vak)
+        # the undisturbed path: 3 chunks → STORED (the probe is not blind)
         for c in self.chunks[:2]:
             self.assertIsNone(self.dst.receive_chunk(self.desc, c))
         self.assertEqual(self.dst.receive_chunk(self.desc, self.chunks[2]), self.desc)
-        # már megvan: egy második feltöltő lezáró darabja a dedupe-ágon sikert ad
+        # already present: a second uploader's closing chunk gets success on the dedupe branch
         self.assertEqual(self.dst.receive_chunk(self.desc, self.chunks[2]), self.desc)
 
     def test_control_exactly_at_threshold_is_still_live(self):
@@ -92,7 +92,7 @@ class AbandonedPartial(unittest.TestCase):
             self.dst.receive_chunk(self.desc, self.chunks[0])
 
     def test_env_threshold_cannot_disable_the_protection(self):
-        # külső validáció: env=0 korábban kikapcsolta a védelmet; most a padló (60 s) alá nem vihető, csak fölé
+        # external validation: env=0 used to disable the protection; now it cannot be taken below the floor (60 s), only above
         import importlib, os
         old = os.environ.get("AGENT_BUS_ATTACH_PARTIAL_STALE_S")
         try:

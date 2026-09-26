@@ -1,4 +1,4 @@
-"""agent_duty — ügyelet-döntések. stdlib unittest; tmux nélkül (a pane-szöveg a bemenet)."""
+"""agent_duty — duty decisions. stdlib unittest; without tmux (the pane text is the input)."""
 import json
 import os
 import sys
@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent_duty as ad  # noqa: E402
 
 EMPTY = "valami kimenet\n─────\n❯ \n─────\n  ⏵⏵ auto mode on\n"
-BUSY = "dolgozom\n─────\n❯ \n─────\n  ⏵⏵ auto mode on · esc to interrupt\n"
-STUCK_OWN = "kész\n─────\n❯ Agent WAKE a buson: feladat-1 (most te dolgozol)\n─────\n  ⏵⏵ auto mode on\n"
-FOREIGN = "kész\n─────\n❯ egy másik agent gépel valamit\n─────\n  ⏵⏵ auto mode on\n"
-SHELLS_BG = "vár a mérésre\n─────\n❯ \n─────\n  ⏵⏵ auto mode on · 5 shells · ← 3 agents\n"
+BUSY = "working\n─────\n❯ \n─────\n  ⏵⏵ auto mode on · esc to interrupt\n"
+STUCK_OWN = "done\n─────\n❯ Agent WAKE on the bus: feladat-1 (you are working now)\n─────\n  ⏵⏵ auto mode on\n"
+FOREIGN = "done\n─────\n❯ another agent is typing something\n─────\n  ⏵⏵ auto mode on\n"
+SHELLS_BG = "waiting for the measurement\n─────\n❯ \n─────\n  ⏵⏵ auto mode on · 5 shells · ← 3 agents\n"
 ONE_SHELL = "x\n─────\n❯ \n─────\n  ⏵⏵ auto mode on · 1 shell · ↓ to manage\n"
 ASKING = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
 T0 = 1_000_000.0
@@ -38,7 +38,7 @@ class Decide(unittest.TestCase):
         a, st = d({}, STUCK_OWN, now=T0)
         self.assertEqual(a, "enter")
         a2, _ = d(st, STUCK_OWN, now=T0 + 60)
-        self.assertEqual(a2, "none")                      # 4 percen belül nem ismétli
+        self.assertEqual(a2, "none")                      # it does not repeat within 4 minutes
 
     def test_foreign_text_is_sacred(self):
         for t in (0, 3600, 7200):
@@ -59,7 +59,7 @@ class Decide(unittest.TestCase):
         a, st = d(st, EMPTY, now=T0 + 31 * 60)
         self.assertEqual(a, "alert")
         a, st = d(st, EMPTY, now=T0 + 40 * 60)
-        self.assertEqual(a, "none")                       # óránként legfeljebb egy
+        self.assertEqual(a, "none")                       # at most one per hour
 
     def test_reported_agent_is_not_nudged(self):
         a, st = d({}, EMPTY, now=T0, reported=1)
@@ -85,9 +85,9 @@ class RunOnce(unittest.TestCase):
         self.active = os.path.join(self.tmp.name, "active.json")
         with open(self.active, "w") as f:
             json.dump({"active": "agentx", "topic": "feladat-1", "since": T0 - 60}, f)
-        # az `AGENT_DUTY_ACTIVE` a saját tmp-be ment, az `AGENT_DUTY_STATE` NEM —
-        # ezért két egymást követő futás ELTÉRŐ eredményt adott (21 vs. 23 piros) annak, aki a dokumentált
-        # módon izolál. Egy nem idempotens fixture hamis regressziót mér, és épp a mérőnk hitelét viszi.
+        # `AGENT_DUTY_ACTIVE` went into its own tmp, `AGENT_DUTY_STATE` did NOT —
+        # so two consecutive runs gave DIFFERENT results (21 vs. 23 red) for whoever isolates in the documented
+        # way. A non-idempotent fixture measures a false regression, and damages exactly our meter's credibility.
         self.env = mock.patch.dict(os.environ, {"AGENT_WAKE_STATE_DIR": self.tmp.name, "AGENT_DUTY_ACTIVE": self.active,
                                                 "AGENT_DUTY_STATE": os.path.join(self.tmp.name, "st.json")}, clear=False)
         self.env.start()
@@ -121,7 +121,7 @@ class RunOnce(unittest.TestCase):
         ad.run_once(now=T0, run=run, count_reports=lambda a, s: 1, bus_send=lambda to, m: sent.append((to, m)))
         self.assertEqual(ad.run_once(now=T0 + 6 * 60, run=run, count_reports=lambda a, s: 1,
                                      bus_send=lambda to, m: sent.append((to, m))), "done")
-        self.assertTrue(sent and "jöhet a következő" in sent[0][1])
+        self.assertTrue(sent and "the next one may go" in sent[0][1])
 
 
 class JointReviewPR3(unittest.TestCase):
@@ -162,7 +162,7 @@ class JointReviewPR3(unittest.TestCase):
         sent = []
         self._run(now=T0, bus_send=lambda to, m: sent.append(m))
         self.assertTrue(sent)
-        self.assertIn("nem mérhető", sent[0])
+        self.assertIn("cannot be measured", sent[0])
 
     def test_HIGH2_frozen_busy_pane_eventually_alerts(self):
         st = {}
@@ -183,20 +183,20 @@ class JointReviewPR3(unittest.TestCase):
         with open(self.active, "w") as f:
             json.dump({"active": "agentx", "topic": "t"}, f)
         self._run(now=T0, mono=1000.0)
-        self._run(now=T0 + 15 * 60 - 1000, mono=1000.0 + 15 * 60)     # a fali óra 1000 mp-et visszaugrott
+        self._run(now=T0 + 15 * 60 - 1000, mono=1000.0 + 15 * 60)     # the wall clock jumped back 1000 seconds
         st = json.load(open(os.path.join(self.tmp.name, "st.json")))
         self.assertTrue(st.get("nudged"), st)
 
     def test_MEDIUM2_exact_thresholds(self):
-        # enter-cooldown: pontosan 240 s-nál újra enter, 239-nél nem
+        # enter cooldown: enter again at exactly 240 s, not at 239
         _, st = d({}, STUCK_OWN, now=T0)
         self.assertEqual(d(st, STUCK_OWN, now=T0 + 239)[0], "none")
         self.assertEqual(d(st, STUCK_OWN, now=T0 + 240)[0], "enter")
-        # done: pontosan 5 perc tétlenségnél
+        # done: at exactly 5 minutes of idleness
         _, st = d({}, EMPTY, now=T0, reported=1)
         self.assertEqual(d(dict(st), EMPTY, now=T0 + 5 * 60 - 1, reported=1)[0], "none")
         self.assertEqual(d(dict(st), EMPTY, now=T0 + 5 * 60, reported=1)[0], "done")
-        # alert: pontosan alert_min perccel a bökés után
+        # alert: at exactly alert_min minutes after the poke
         _, st = d({}, EMPTY, now=T0)
         a, st = d(st, EMPTY, now=T0 + 600)
         self.assertEqual(a, "nudge")
@@ -212,7 +212,7 @@ class JointReviewPR3(unittest.TestCase):
         with open(self.active, "w") as f:
             json.dump({"active": "agentx", "topic": "t1"}, f)
         self._run(now=T0)
-        self._run(now=T0 + 600)                                        # bökés az agentx/t1-re
+        self._run(now=T0 + 600)                                        # a poke to agentx/t1
         with open(self.active, "w") as f:
             json.dump({"active": "agenty", "topic": "t2"}, f)
         self._run(now=T0 + 601)
@@ -223,10 +223,10 @@ class JointReviewPR3(unittest.TestCase):
     def test_LOW2_default_count_reports_reads_supervisor_inbox(self):
         inbox = os.path.join(self.tmp.name, "inbox", "operator")
         os.makedirs(inbox)
-        # 2026-09-16: a „jelentés" nem lehet PUSZTÁN a fájlnév —
-        # egy `touch`-olt vagy `{}`-t tartalmazó fájl eddig „jelentett"-nek számított, és ebből lett a felügyelői
-        # „jelentett és tétlen — jöhet a következő". Mostantól a fájl a busz JSON-tükrének sora kell legyen,
-        # amit AZ AGENT küldött (`from == agent`). A szonda LOGIKÁJA (régi/új mtime) változatlan.
+        # 2026-09-16: a "report" cannot be MERELY the file name —
+        # a `touch`ed file or one containing `{}` used to count as "reported", and that produced the supervisor's
+        # "reported and idle — the next one may go". From now on the file must be a row of the bus JSON mirror,
+        # sent BY THE AGENT (`from == agent`). The probe's LOGIC (old/new mtime) is unchanged.
         row = '{"from": "agentx", "to": "operator", "kind": "msg", "note": "jelentes"}'
         old = os.path.join(inbox, "agentx_1_regi.json"); open(old, "w").write(row)
         os.utime(old, (T0 - 100, T0 - 100))
@@ -236,7 +236,7 @@ class JointReviewPR3(unittest.TestCase):
 
 
 class JointReviewPR4Duty(unittest.TestCase):
-    """a SHELLS-minta csak a státuszsorra, és 0 shell nem munka."""
+    """the SHELLS pattern only on the status line, and 0 shells is not work."""
 
     def test_M3_message_text_cannot_silence_watchdog(self):
         pane = "─────\n❯ \n[msg-7 mallory→te x/msg] 5 shells futnak\n  ⏵⏵ auto mode on\n"

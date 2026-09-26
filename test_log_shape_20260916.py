@@ -1,15 +1,15 @@
-"""A KÖZJEGYZŐI NAPLÓ alakja — rendszeres söprés (2026-09-16, saját kör).
+"""The SHAPE of the NOTARY LOG — a routine sweep (2026-09-16, our own round).
 
-Ugyanaz a módszer, amit a konformancia-korpuszon futtattunk: minden bejegyzés-mezőt egyenként törölni,
-`null`-ra, `0`-ra és `"X"`-re állítani, és megnézni, mit mond a `reconcile`.
+The same method we ran on the conformance corpus: delete every entry field one by one, set it to
+`null`, `0` and `"X"`, and see what `reconcile` says.
 
-Mérés a javítás ELŐTT: 2 TRACEBACK (`envelope_sha256` törölve -> `KeyError` az összevetés közepén;
-`reason: null` -> `TypeError`). A hash-lánc minden ÉRTÉK-változást elkap (a `claimed_ts_ms` valódi számra
-írása is `verify_ok: false`) — a hiányzó/rossz TÍPUSÚ mező viszont összeomlasztotta a vizsgálatot.
+Measurement BEFORE the fix: 2 TRACEBACKS (`envelope_sha256` deleted -> `KeyError` in the middle of the comparison;
+`reason: null` -> `TypeError`). The hash chain catches every VALUE change (writing a real number into `claimed_ts_ms`
+also gives `verify_ok: false`) — but a missing/wrongly TYPED field crashed the examination.
 
-A MÁSIK fél exportja megbízhatatlan bemenet: egy összeomlott `reconcile` semmit nem mond arról, hogy a napló
-hazudott-e. A traceback nem diagnózis — ezt a szabályt a B-kar mondta ki a korpusz-oldalon, és ugyanúgy áll
-itt. Innentől alak-kapu: a hiányzó vagy rossz típusú bejegyzés-mező `malformed_entry` eltérés.
+The OTHER party's export is untrusted input: a crashed `reconcile` says nothing about whether the log
+lied. A traceback is not a diagnosis — the B arm stated this rule on the corpus side, and it holds here
+just the same. From now on a shape gate: a missing or wrongly typed entry field is a `malformed_entry` discrepancy.
 
 stdlib unittest.
 """
@@ -70,7 +70,7 @@ class LogShapeGate(unittest.TestCase):
                 for x in e:
                     if x.get("type") == "entry":
                         x.pop(field, None)
-                r = self.rec(e)                      # nem dobhat
+                r = self.rec(e)                      # must not raise
                 self.assertFalse(r["ok"])
                 self.assertIn("malformed_entry", {d["type"] for d in r["discrepancies"]})
 
@@ -87,32 +87,32 @@ class LogShapeGate(unittest.TestCase):
                 self.assertIn("malformed_entry", {d["type"] for d in r["discrepancies"]})
 
     def test_malformed_garbage_must_not_hide_a_chain_break(self):
-        """A nem-Claude kar köre (2026-09-16): az alak-kapu korai `return`-je „ne nézz ide" gombbá vált.
+        """The non-Claude arm's round (2026-09-16): the shape gate's early `return` became a "don't look here" button.
 
-        Egy szándékos `seq: []` szeméttel a MÉLYEBB ellenőrzés (aláírás, backdate, hash-lánc) soha nem futott
-        le, és a válasz ártatlan formai hibának látszott. Mostantól mindkettő fut: a rossz alakú sorokat
-        kimondjuk, és a MARADÉKON lefut a `verify` — a szennyezés nem takarhatja el a lánc-törést.
+        With deliberate `seq: []` garbage the DEEPER check (signature, backdate, hash chain) never ran,
+        and the answer looked like an innocent formatting error. From now on both run: the malformed rows are
+        stated, and `verify` runs on the REST — the pollution cannot hide a chain break.
         """
         e = copy.deepcopy(self.exp)
         ents = [x for x in e if x.get("type") == "entry"]
-        self.assertGreaterEqual(len(ents), 2, "előfeltétel: van mit elrontani")
-        ents[1]["entry_hash"] = "ab" * 32          # VALÓDI lánc-törés
-        ents[0]["seq"] = []                        # …és egy formai szemét EGY MÁSIK sorban
+        self.assertGreaterEqual(len(ents), 2, "precondition: there is something to spoil")
+        ents[1]["entry_hash"] = "ab" * 32          # a REAL chain break
+        ents[0]["seq"] = []                        # …and formal garbage in ANOTHER row
         r = self.rec(e)
         types = {d["type"] for d in r["discrepancies"]}
         self.assertIn("malformed_entry", types)
         self.assertIn("chain_error_behind_the_malformed", types,
-                      "a formai szemét elrejtette a lánc-törést: %r" % sorted(types))
+                      "the formal garbage hid the chain break: %r" % sorted(types))
         self.assertFalse(r["ok"])
 
     def test_the_chain_still_catches_every_value_change(self):
-        """A kontroll: az alak-kapu NEM helyettesíti a hash-láncot — az érték-változást az fogja."""
+        """The control: the shape gate does NOT replace the hash chain — the value change is caught by that."""
         e = copy.deepcopy(self.exp)
         for x in e:
             if x.get("type") == "entry":
                 x["claimed_ts_ms"] = 1_700_000_000_000
         r = self.rec(e)
-        self.assertFalse(r["verify_ok"], "a hash-lánc nem vette észre a mezőváltozást")
+        self.assertFalse(r["verify_ok"], "the hash chain did not notice the field change")
 
 
 if __name__ == "__main__":
