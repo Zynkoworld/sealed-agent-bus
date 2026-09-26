@@ -1,19 +1,19 @@
-"""`_audit_cross`: kulcsra párosítás és kétirányú fedettségi kapu — (2026-09-17, ALACSONY-KÖZEPES).
+"""`_audit_cross`: pairing by key and a two-way coverage gate — (2026-09-17, LOW-MEDIUM).
 
-A lelet két része, mindkettő mérve, valódi buszon:
-  (a) a hossz-kapu EGYIRÁNYÚ volt: csak „a napló többet mond, mint az audit" (audit_row_missing) tüzelt; a fordított
-      irány — 2 napló-ack / 3 audit-sor, sőt 0 / 3 — NÉMA maradt. Pedig az ELREJTÉS iránya épp ez: a független
-      nyilvántartás többet tud, mint az önbevallás.
-  (b) a két nyilvántartást POZÍCIÓ szerint párosította (`zip`): ha a naplóból kiesik egy ack, minden további pár
-      elcsúszik, és a vád (audit_cursor_mismatch) BECSÜLETES bejegyzésre mutat — a megvádolt fél joggal mutatja meg,
-      hogy az ő sora rendben van, és a kereszt-ellenőrzés hitele sérül, pedig a rendszernek igaza volt, hogy baj van.
+The two parts of the finding, both measured on a real bus:
+  (a) the length gate was ONE-WAY: only "the log says more than the audit" (audit_row_missing) fired; the reverse
+      direction — 2 log acks / 3 audit rows, even 0 / 3 — stayed SILENT. Yet that is exactly the direction of HIDING: the independent
+      record knows more than the self-report.
+  (b) it paired the two records BY POSITION (`zip`): if an ack drops out of the log, every further pair
+      slides, and the accusation (audit_cursor_mismatch) points at an HONEST entry — the accused party rightly shows
+      that its row is fine, and the cross-check's credibility suffers, although the system was right that something was wrong.
 
-Javítás: párosítás KULCSRA (audit from_id/to_id ↔ napló cursor.from/to, napló-sorrendben, egy sor egyszer), és a
-fordított irány saját neve: `audit_row_unlogged`, a hiányzó audit-sorok seq-jével. az egyik kar erős cáfolata áll tovább
-(a skipped-jel nem tüntethető el), ezt itt nem mérjük újra.
+Fix: pairing BY KEY (audit from_id/to_id ↔ log cursor.from/to, in log order, each row once), and the
+reverse direction's own name: `audit_row_unlogged`, with the seqs of the missing audit rows. One arm's strong refutation still stands
+(the skipped signal cannot be made to disappear), we do not re-measure that here.
 
-Mutáns-próba: pozíció-párosítással `test_dropped_middle_ack_does_not_accuse_the_honest_third` bukik; a fordított kapu
-nélkül `test_audit_rows_without_log_ack_are_named` bukik. stdlib unittest; valódi busz + valódi audit-export, /tmp.
+Mutant probe: with position pairing `test_dropped_middle_ack_does_not_accuse_the_honest_third` fails; without the reverse gate
+`test_audit_rows_without_log_ack_are_named` fails. stdlib unittest; a real bus + a real audit export, /tmp.
 """
 import os
 import sys
@@ -40,7 +40,7 @@ class KeyPairedAuditCross(unittest.TestCase):
             "AGENT_WAKE_DIR": os.path.join(t, "wake"), "AGENT_BUS_NOTARY_LOG": self.log,
             "AGENT_BUS_AUTO_SIGN": "0"}, clear=False)
         self.p.start()
-        # HÁROM becsületes kör: 2 üzenet → kiadás → ack, minden ack a naplóban ÉS a busz audit-táblájában
+        # THREE honest rounds: 2 messages → delivery → ack, every ack in the log AND in the bus audit table
         n = bn.Notary(self.log, seed=self.seed, checkpoint_every=1)
         rec = lambda **kw: n.record(sender_identity="peer", sender_auth="ssh-key", recipient="peer", **kw)
         self.steps = []
@@ -70,7 +70,7 @@ class KeyPairedAuditCross(unittest.TestCase):
         return {d["type"]: d for d in out}
 
     def _without_ack(self, which):
-        """A naplóból a `which`-edik (0-alapú) ack-bejegyzés kiesik — minden más marad."""
+        """The `which`-th (0-based) ack entry drops out of the log — everything else stays."""
         drop_to = self.steps[which][1]
         return [e for e in self.entries
                 if not (e.get("kind") == "ack" and isinstance(e.get("cursor"), dict) and e["cursor"].get("to") == drop_to)]
@@ -86,16 +86,16 @@ class KeyPairedAuditCross(unittest.TestCase):
             self.assertNotIn(t, r, r)
 
     def test_dropped_middle_ack_does_not_accuse_the_honest_third(self):
-        # az egyik kar (b): a 2. napló-ack kiesik; a 3. napló-ack lépése (pl. 20→30) BÁJTRA egyezik a 3. audit-sorral
+        # one arm's (b): the 2nd log ack drops out; the 3rd log ack's step (e.g. 20→30) matches the 3rd audit row BYTE for byte
         r = self.cross(self._without_ack(1))
-        self.assertNotIn("audit_cursor_mismatch", r, r)          # a becsületes 3. ack NEM kap vádat
+        self.assertNotIn("audit_cursor_mismatch", r, r)          # the honest 3rd ack is NOT accused
         self.assertIn("audit_row_unlogged", r, r)
         acks = [a for a in self.audit if str(a.get("op", "")).startswith("ack")]
-        self.assertEqual(r["audit_row_unlogged"]["audit_seq"], [acks[1]["seq"]])   # a HIÁNYZÓ sor a néven nevezve
+        self.assertEqual(r["audit_row_unlogged"]["audit_seq"], [acks[1]["seq"]])   # the MISSING row named
         self.assertEqual(r["audit_row_unlogged"]["steps"], [list(self.steps[1])])
 
     def test_audit_rows_without_log_ack_are_named(self):
-        # az egyik kar (a): 2/3, 1/3 és 0/3 — mind néma volt
+        # one arm's (a): 2/3, 1/3 and 0/3 — all were silent
         for drop in ([1], [0, 1], [0, 1, 2]):
             ents = self.entries
             for w in drop:
@@ -109,16 +109,16 @@ class KeyPairedAuditCross(unittest.TestCase):
             self.assertEqual(len(r["audit_row_unlogged"]["audit_seq"]), len(drop))
 
     def test_control_the_other_direction_still_fires(self):
-        # napló TÖBBET mond: egy negyedik, hazug ack-bejegyzés → audit_row_missing (a régi kapu változatlan)
+        # the log says MORE: a fourth, lying ack entry → audit_row_missing (the old gate unchanged)
         extra = dict(self.entries[-1]); extra = {**extra, "kind": "ack", "decision": "accepted",
                                                 "cursor": {"from": 99, "to": 120, "ack": 120}, "recipient": "peer"}
         r = self.cross(self.entries + [extra])
         self.assertIn("audit_row_missing", r, r)
-        self.assertIn("audit_cursor_mismatch", r, r)              # a hazug lépéshez nincs audit-sor: a VÁD RÁ mutat
+        self.assertIn("audit_cursor_mismatch", r, r)              # there is no audit row for the lying step: the ACCUSATION points at it
         self.assertEqual(r["audit_cursor_mismatch"]["log"], [99, 120])
 
     def test_lying_step_is_accused_by_its_own_entry_not_by_position(self):
-        # a 2. napló-ack lépését átírjuk: a vád a 2.-ra mutat, a 3. érintetlen marad
+        # we rewrite the 2nd log ack's step: the accusation points at the 2nd, the 3rd stays untouched
         ents = []
         for e in self.entries:
             if e.get("kind") == "ack" and isinstance(e.get("cursor"), dict) and e["cursor"].get("to") == self.steps[1][1]:
@@ -128,8 +128,8 @@ class KeyPairedAuditCross(unittest.TestCase):
         self.assertIn("audit_cursor_mismatch", r, r)
         self.assertEqual(r["audit_cursor_mismatch"]["log"], [self.steps[1][0], self.steps[1][1] + 7])
         acks = [a for a in self.audit if str(a.get("op", "")).startswith("ack")]
-        self.assertEqual(r["audit_cursor_mismatch"]["audit_seq"], [acks[1]["seq"]])   # a párosítatlan audit-sor
-        self.assertNotIn("audit_row_unlogged", r, r)              # a darabszám egyezik: ez eltérés, nem elrejtés
+        self.assertEqual(r["audit_cursor_mismatch"]["audit_seq"], [acks[1]["seq"]])   # the unpaired audit row
+        self.assertNotIn("audit_row_unlogged", r, r)              # the counts match: this is a discrepancy, not hiding
 
 
 if __name__ == "__main__":

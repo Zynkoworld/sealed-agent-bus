@@ -1,16 +1,16 @@
-"""A `signed shape v:2` négy INTEROP-tulajdonsága rögzítve — amiken egy másik kar némán divergálna.
+"""The four INTEROP properties of `signed shape v:2` pinned — where another arm would silently diverge.
 
-MIÉRT LÉTEZIK EZ A FÁJL. A bájtképet nem csak mi építjük: egy interop-partner a dokumentációból
-implementálja újra. Ami a dokumentációban NINCS KIMONDVA, azt mindenki a saját nyelvének
-alapértelmezése szerint dönti el — és a nyelvek alapértelmezései eltérnek. Ilyenkor nem hibaüzenet
-lesz, hanem érvénytelen aláírás: a sor a feladónál jó, a vevőnél rossz.
+WHY THIS FILE EXISTS. We are not the only ones building the byte image: an interop partner reimplements it from the
+documentation. Whatever is NOT STATED in the documentation, everyone decides by their own language's
+default — and the languages' defaults differ. Then the result is not an error message
+but an invalid signature: the row is fine at the sender and wrong at the receiver.
 
-Négy ilyen pontot egy idegen családú, független újraimplementáció (saját JS-vektorok, node:crypto)
-mért ki. Mind a négy IGAZ a mi fánkon is — ez a fájl ezt méri, nem elhiszi. A doksi §2b ugyanezt
-mondja ki normatívan; ha a kettő elválik, az itt bukik el, nem egy partner integrációján.
+Four such points were measured by an independent reimplementation from a foreign family (its own JS vectors, node:crypto).
+All four are TRUE on our tree too — this file measures that, it does not believe it. The doc's §2b states the same
+normatively; if the two diverge, it fails here, not on a partner's integration.
 
-A rögzítés iránya fontos: ezek NEM kívánságok, hanem a MAI mért viselkedés. Ha valamelyik
-megváltozik, az kétkaros döntés legyen, ne egy commit mellékhatása.
+The direction of the pinning matters: these are NOT wishes, but TODAY's measured behaviour. If any of them
+changes, that should be a two-arm decision, not a side effect of a commit.
 stdlib unittest.
 """
 import os
@@ -28,20 +28,20 @@ BASE = {"v": 2, "sender": "a", "recipient": "b", "topic": "t", "kind": "msg",
 
 class SignedShapeInterop(unittest.TestCase):
     def test_no_unicode_normalisation_happens(self):
-        """NFC és NFD KÜLÖNBÖZŐ aláírást ad. Aki normalizál, csendes verify-bukást épít."""
+        """NFC and NFD give DIFFERENT signatures. Whoever normalizes builds a silent verify failure."""
         nfc = ab._a2_content_bytes(dict(BASE, body=unicodedata.normalize("NFC", "ő")))
         nfd = ab._a2_content_bytes(dict(BASE, body=unicodedata.normalize("NFD", "ő")))
-        self.assertNotEqual(nfc, nfd, "a bájtkép normalizál — ez ELTÉRÉS a kimondott viselkedéstől")
+        self.assertNotEqual(nfc, nfd, "the byte image normalizes — that is a DEVIATION from the stated behaviour")
 
     def test_the_timestamp_is_an_integer_not_a_float(self):
-        """A nanoszekundumos ts > 2^53: lebegőpontosan már a TÁROLÁSNÁL elveszik a pontosság.
+        """The nanosecond ts > 2^53: as floating point, precision is lost already at STORAGE.
 
-        A PIN SZÁNDÉKOSAN MOZDULT. Ez a teszt először azt rögzítette, hogy a float `ts` MÁS bájtképet
-        ad — igaz volt, de gyenge: a hívó néma, spec-ellenes bájtképet írt alá, és a hiba a partner
-        oldalán jött elő. A kanonizáló azóta típus-őr is: a nem-egész `ts` ÉRTHETŐ hibát dob, nem
-        bájtképet. Ez szigorúbb, és a spec (§2b: a ts egész) mostantól a kódban is ki van kényszerítve."""
+        THE PIN MOVED DELIBERATELY. This test first pinned that a float `ts` gives a DIFFERENT byte image
+        — true, but weak: the caller signed a silent, spec-violating byte image, and the error surfaced on the partner's
+        side. The canonicalizer has since become a type guard too: a non-integer `ts` raises a CLEAR error, not a
+        byte image. This is stricter, and the spec (§2b: ts is an integer) is now enforced in the code too."""
         as_int = ab._a2_content_bytes(dict(BASE, ts=1758265200123456789))
-        self.assertIn(b'"ts":1758265200123456789', as_int, "az egész ts nem pontosan íródik ki")
+        self.assertIn(b'"ts":1758265200123456789', as_int, "the integer ts is not written exactly")
         with self.assertRaises(ValueError):
             ab._a2_content_bytes(dict(BASE, ts=float(1758265200123456789)))
         for bad in (1.5, True, "123", None):
@@ -49,25 +49,25 @@ class SignedShapeInterop(unittest.TestCase):
                 ab._a2_content_bytes(dict(BASE, ts=bad))
 
     def test_the_key_order_is_alphabetical_not_the_field_list_order(self):
-        """A mezőlistában a HALMAZ fagyott, nem a sorrend. A szerializálás rendez."""
+        """In the field list the SET is frozen, not the order. Serialization sorts."""
         import re
         out = ab._a2_content_bytes(BASE).decode("utf-8")
         keys = re.findall(r'"([a-z_]+)":', out)
-        self.assertEqual(keys, sorted(keys), "a kulcsok nem alfabetikusak")
+        self.assertEqual(keys, sorted(keys), "the keys are not alphabetical")
         self.assertEqual(keys, ["body", "in_reply_to", "kind", "recipient", "sender", "topic", "ts", "v"])
         self.assertNotEqual(keys, list(ab._A2_SIGNED_FIELDS),
-                            "ha a kettő egybeesne, a teszt nem mondana semmit a sorrendről")
+                            "if the two coincided, the test would say nothing about the order")
 
     def test_excluded_and_unknown_fields_do_not_change_the_bytes(self):
-        """A bájtkép PONTOSAN a nyolc mezőből épül — ezért írhat alá a feladó és ellenőrizhet a vevő
-        kissé eltérő alakú rekordból."""
+        """The byte image is built from EXACTLY the eight fields — that is why the sender can sign and the receiver can verify
+        from a slightly differently shaped record."""
         noisy = dict(BASE, id=42, thread_id="t1", read_at=1, sig="ab" * 64, pubkey="cd" * 32,
                      a_field_nobody_has_defined_yet=[1, 2, 3])
         self.assertEqual(ab._a2_content_bytes(BASE), ab._a2_content_bytes(noisy))
 
     def test_a_missing_optional_field_falls_to_the_documented_default(self):
-        """Ellenpróba: a rögzítés nem arról szól, hogy MINDEN mindegy. A hiányzó opcionálisak
-        dokumentált alapértékre esnek, és az MÁS bájtkép, mint egy kitöltött mező."""
+        """Counter-check: the pinning is not about EVERYTHING being irrelevant. Missing optional fields
+        fall to a documented default, and that is a DIFFERENT byte image from a filled-in field."""
         bare = {"sender": "a", "recipient": "b", "ts": BASE["ts"]}
         self.assertIn(b'"topic":""', ab._a2_content_bytes(bare))
         self.assertIn(b'"in_reply_to":null', ab._a2_content_bytes(bare))

@@ -1,14 +1,14 @@
-"""Az SDS-boríték hídjának támadása — saját.
+"""An attack on the SDS envelope bridge — our own.
 
-Három lelet a nem-Claude kartól:
-  1. a KÜLSŐ validátor egyedül döntött, és egy env-változóból tetszőleges modul betölthető
-     (`AGENT_BUS_SDS_VALIDATOR=rogue:ok`) -> aláírás, admission, minden megkerülhető volt.
-     Javítás: a BEÉPÍTETT ellenőrzés fut előbb, a külső CSAK SZIGORÍTHAT.
-  2. az admission `config_id` OPCIONÁLIS volt -> hiányában a kötés csendben kimaradt, és egy másik
-     config-kontextusba átültetett boríték is átment (cross-config replay).
-     Javítás: hiányzó kötés -> `unverifiable(no-config-binding)`, harmadik állapot.
-  3. a role/org Unicode-alakja (NFC vs NFD) két KÜLÖNBÖZŐ aláírt bájtsort ad ugyanarra a látszólagos
-     értékre. Javítás: az admission mezőit NFC-re normalizáljuk az aláírt üzenet építésekor.
+Three findings from the non-Claude arm:
+  1. the EXTERNAL validator decided alone, and an arbitrary module could be loaded from an env variable
+     (`AGENT_BUS_SDS_VALIDATOR=rogue:ok`) -> signature, admission, everything could be bypassed.
+     Fix: the BUILT-IN check runs first, the external one can ONLY TIGHTEN.
+  2. the admission `config_id` was OPTIONAL -> without it the binding was silently skipped, and an envelope
+     transplanted into another config context also passed (cross-config replay).
+     Fix: a missing binding -> `unverifiable(no-config-binding)`, a third state.
+  3. the Unicode form of role/org (NFC vs NFD) gives two DIFFERENT signed byte sequences for the same apparent
+     value. Fix: we normalize the admission fields to NFC when building the signed message.
 
 stdlib unittest + cryptography.
 """
@@ -34,12 +34,12 @@ def _keypair():
     return k, pub
 
 
-@unittest.skipUnless(sds.HAVE_CRYPTO, "cryptography szükséges")
+@unittest.skipUnless(sds.HAVE_CRYPTO, "cryptography required")
 class SdsBridgeUnderAttack(unittest.TestCase):
     def setUp(self):
         self.key, self.pub = _keypair()
         self.role, self.org = "operator", "node"
-        rec = {"kind": "note", "body": "mérés"}
+        rec = {"kind": "note", "body": "measurement"}
         rec["record_id"] = sds.record_id_of(rec)
         domain = {"project": "node", "stream": "meres", "repo": "agent-bus"}
         env = {"record_id": rec["record_id"], "config_id": "sha256:" + "11" * 32,
@@ -58,32 +58,32 @@ class SdsBridgeUnderAttack(unittest.TestCase):
         kw.setdefault("registry_pubkey", self.pub)
         return sds.verify(self.body, **kw)
 
-    # ── kontroll: a becsületes boríték érvényes ──────────────────────────────
+    # ── control: the honest envelope is valid ──────────────────────────────
     def test_control_honest_envelope_is_valid(self):
         self.assertEqual(self.verify(), ("valid", ""))
 
-    # ── kontroll: a rossz aláírás bukik ─────────────────────────────────────
+    # ── control: a bad signature fails ─────────────────────────────────────
     def test_control_bad_signature_is_invalid(self):
         env = json.loads(self.body)
         env["envelope"]["sigs"][0]["sig"] = "00" * 64
         self.body = json.dumps(env, sort_keys=True)
         self.assertEqual(self.verify()[0], "invalid")
 
-    # ── 1: a külső validátor NEM tehet érvényessé egy érvénytelen borítékot ──
+    # ── 1: the external validator CANNOT make an invalid envelope valid ──
     def test_external_validator_cannot_upgrade_an_invalid_envelope(self):
         env = json.loads(self.body)
-        env["envelope"]["sigs"][0]["sig"] = "00" * 64            # hamis aláírás
+        env["envelope"]["sigs"][0]["sig"] = "00" * 64            # a forged signature
         self.body = json.dumps(env, sort_keys=True)
         with mock.patch.object(sds, "_external_validator", lambda: (lambda framed, ctx: "valid")):
             status, why = self.verify()
-        self.assertEqual(status, "invalid", "a külső validátor felülírta a beépített elutasítást (%s)" % why)
+        self.assertEqual(status, "invalid", "the external validator overrode the built-in rejection (%s)" % why)
 
-    # ── 1b: a külső validátor viszont SZIGORÍTHAT ───────────────────────────
+    # ── 1b: the external validator CAN still tighten ───────────────────────────
     def test_external_validator_may_still_tighten(self):
         with mock.patch.object(sds, "_external_validator", lambda: (lambda framed, ctx: ("invalid", "policy"))):
             self.assertEqual(self.verify(), ("invalid", "policy"))
 
-    # ── 1c: a külső validátor megkapja a beépített eredményt is ─────────────
+    # ── 1c: the external validator also gets the built-in result ─────────────
     def test_external_validator_sees_the_builtin_result(self):
         seen = {}
 
@@ -93,9 +93,9 @@ class SdsBridgeUnderAttack(unittest.TestCase):
 
         with mock.patch.object(sds, "_external_validator", lambda: ext):
             self.verify()
-        self.assertEqual(seen.get("status"), "valid", "a külső validátor nem látja, mit mondott a beépített")
+        self.assertEqual(seen.get("status"), "valid", "the external validator does not see what the built-in one said")
 
-    # ── 2: hiányzó config-kötés = harmadik állapot, nem csendes pass ─────────
+    # ── 2: a missing config binding = a third state, not a silent pass ─────────
     def test_missing_config_binding_is_not_silent(self):
         adm = dict(self.admission)
         adm.pop("config_id")
@@ -105,20 +105,20 @@ class SdsBridgeUnderAttack(unittest.TestCase):
         adm = dict(self.admission, config_id="sha256:" + "22" * 32)
         self.assertEqual(self.verify(admission=adm), ("invalid", "config-mismatch"))
 
-    # ── 3: NFC/NFD — ugyanaz a role két alakban ugyanazt jelenti ────────────
+    # ── 3: NFC/NFD — the same role in two forms means the same ────────────
     def test_role_unicode_forms_agree(self):
         role_nfd = unicodedata.normalize("NFD", "kávé-operátor")
         role_nfc = unicodedata.normalize("NFC", "kávé-operátor")
-        self.assertNotEqual(role_nfd, role_nfc, "előfeltétel: a két alak bájtban különbözik")
+        self.assertNotEqual(role_nfd, role_nfc, "precondition: the two forms differ in bytes")
         env = json.loads(self.body)["envelope"]
         env["sigs"] = []
-        msg = sds.signed_message(env, role_nfc, self.org)        # NFC alakkal ALÁÍRVA
+        msg = sds.signed_message(env, role_nfc, self.org)        # SIGNED with the NFC form
         env["sigs"] = [{"issuer": self.pub, "sig": self.key.sign(msg).hex()}]
         self.body = json.dumps({"record": json.loads(self.body)["record"], "envelope": env}, sort_keys=True)
         adm = {"config_id": env["config_id"],
-               "admitted": [{"sender": "hub", "issuer": self.pub, "org": self.org, "role": role_nfd}]}  # NFD az admissionban
+               "admitted": [{"sender": "hub", "issuer": self.pub, "org": self.org, "role": role_nfd}]}  # NFD in the admission
         self.assertEqual(self.verify(admission=adm), ("valid", ""),
-                         "az NFD-alakú admission-role miatt a becsületes aláírás érvénytelennek látszott")
+                         "because of the NFD-form admission role the honest signature looked invalid")
 
 
 if __name__ == "__main__":

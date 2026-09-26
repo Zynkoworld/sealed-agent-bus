@@ -46,6 +46,9 @@ FILE_VECTORS = {
     # signed conformance vector: the doc's sha256, byte length and Ed25519 signatures cover it
     "docs/AGENT_BUS_SCHEMA.md": ("árvíztűrő",),
     "test_schema_doc_signed_shape.py": ("árvíztűrő",),
+    # Unicode normalization vectors: the NFC/NFD difference of these exact characters is what is tested
+    "test_signed_shape_interop.py": ('"ő"',),
+    "test_sds_validator_bypass_20260916.py": ("kávé-operátor",),
     # UTF-8 round-trip input for bus_poke._safe
     "test_poke_hardening_20260916.py": ("árvíztűrő tükörfúrógép\\tvége",),
     # leak-scanner regex inputs: Hungarian case endings, protocol vocabulary, invalid version
