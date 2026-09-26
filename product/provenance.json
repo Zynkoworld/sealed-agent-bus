@@ -1,11 +1,11 @@
 {
  "counts": {
-  "first-party": 120,
+  "first-party": 121,
   "generated-here": 15,
   "joint-review-line": 22,
   "partner-same-business": 5,
   "third-party": 0,
-  "total": 162
+  "total": 163
  },
  "files": {
   ".github/workflows/tests.yml": "first-party",
@@ -155,6 +155,7 @@
   "test_signed_shape_interop.py": "first-party",
   "test_signing_entry_points_agree.py": "first-party",
   "test_silent_handlers_20260916.py": "first-party",
+  "test_silent_processing_gap.py": "first-party",
   "test_singleflight_clock_20260916.py": "first-party",
   "test_singleflight_pid_reuse_20260917.py": "first-party",
   "test_slice_anchor_20260916.py": "first-party",
