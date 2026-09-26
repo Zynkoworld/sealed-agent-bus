@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
-"""bus_ssh_exchange — SSH-SZÁLLÍTÁS gépek között: a FOGADÓ gép force-command végpontja (v1.2).
+"""bus_ssh_exchange — SSH TRANSPORT between machines: the force-command endpoint of the RECEIVING machine (v1.2).
 
-Modell (a júliusi SSH-bridge általánosítva): a távoli agent KIFELÉ SSH-zik a busz gépére (kliens-kezdeményezés,
-NAT-on át, a távoli gépen NINCS portnyitás). Az SSH adja a titkosítást + a kliens-kulcsos hitelesítést; a busz-gépen
-az authorized_keys sora `command="… bus_ssh_exchange.py <identity>",restrict,…` → ez a szkript fut, SEMMI MÁS
-(nincs shell, pty, port-forward). Lásd bus_ssh_enroll.py.
+Model (the July SSH bridge, generalized): the remote agent SSHes OUTWARD to the bus machine (client-initiated,
+through NAT, NO port opened on the remote machine). SSH provides encryption + client-key authentication; on the bus machine
+the authorized_keys line is `command="… bus_ssh_exchange.py <identity>",restrict,…` → this script runs, NOTHING ELSE
+(no shell, pty, port forward). See bus_ssh_enroll.py.
 
-Egy SSH-hívás = egy atomi csere-kör (stdin JSON → stdout JSON):
+One SSH call = one atomic exchange round (stdin JSON → stdout JSON):
 
-    be:  {"ack": <utolsó tárolt válasz-id | 0>,
+    in:  {"ack": <last stored reply id | 0>,
           "messages": [{"to", "body", "topic"?, "kind"?, "thread_id"?, "in_reply_to"?}, …],
           "attachments": [{"descriptor": {…}, "chunks": [{"sha256","seq","last","data"}, …]}, …]}
-    ki:  {"identity", "protocol", "accepted": [bus-id…], "rejected": [{"index", "reason"}…],
+    out: {"identity", "protocol", "accepted": [bus-id…], "rejected": [{"index", "reason"}…],
           "attachments": [{"sha256", "status": "stored|partial|rejected", "reason"?}…],
           "replies": [{"id","ts","sender","topic","kind","thread_id","in_reply_to","body","sds"?}…]}
 
-Biztonsági határ:
-- **Az identitás a force-command ARGUMENTUMÁBÓL jön** (a kulcshoz kötve), SOHA nem a payloadból: a
-  `from`/`sender` mezők figyelmen kívül maradnak (anti-spoof).
-- **Méret-plafonok:** a teljes stdin ≤ MAX_BYTES; üzenet/kör ≤ MAX_MESSAGES; a body a busz saját 64 KB-os cap-je.
-- **sds-envelope átmegy:** a busz `send` a keretet ellenőrzi; a boríték ALÁÍRÁSÁT a fogadó oldalon a v1.1
-  `recv --verify-sds` útja nézi — a válaszokban a `sds` mező ezt a címkét adja.
-- **A busz-sort ez a végpont NEM írja alá** a busz-gép kulcsával (AUTO-SIGN ki): a távoli feladó hitelességét az
-  SSH-kulcs adja, a tartalomét az sds-envelope saját aláírása.
-- **v1.5.2 — kliens-aláírt sor:** a message hozhat `ts`/`sig`/`pubkey`-t (a feladó SAJÁT Ed25519-kulcsával, a busz
-  `sign_for_send` alakjában); a végpont a registry-kulcs ellen ellenőrzi és pontosan azt tárolja → a címzett
-  termék-módban `signed`-nek látja. Csupasz sor egy registry-ben PINELT név alatt termék-módban: `rejected` okkal
-  (`unsigned-pinned`) — nem tárolódik, hogy aztán olvasáskor némán eldobódjon.
-- **Legalább-egyszer kézbesítés:** a válaszok PEEK-kel mennek ki; a kurzor csak a kliens KÖVETKEZŐ körbeli `ack`-jára
-  lép (ha az SSH megszakad, semmi nem vész el). stdlib-only."""
+Security boundary:
+- **The identity comes from the force-command ARGUMENT** (bound to the key), NEVER from the payload: the
+  `from`/`sender` fields are ignored (anti-spoof).
+- **Size ceilings:** the whole stdin ≤ MAX_BYTES; messages/round ≤ MAX_MESSAGES; the body gets the bus's own 64 KB cap.
+- **sds-envelope passes:** the bus `send` checks the frame; the envelope's SIGNATURE is checked on the receiving side by the v1.1
+  `recv --verify-sds` path — the `sds` field in the replies gives this label.
+- **This endpoint does NOT sign the bus row** with the bus machine's key (AUTO-SIGN off): the remote sender's authenticity comes from
+  the SSH key, the content's from the sds-envelope's own signature.
+- **v1.5.2 — client-signed row:** a message may carry `ts`/`sig`/`pubkey` (with the sender's OWN Ed25519 key, in the bus's
+  `sign_for_send` shape); the endpoint checks it against the registry key and stores exactly that → the recipient
+  sees it as `signed` in product mode. A bare row under a name PINNED in the registry in product mode: `rejected` with a reason
+  (`unsigned-pinned`) — it is not stored only to be silently dropped on read.
+- **At-least-once delivery:** replies go out with PEEK; the cursor steps only on the client's `ack` in the NEXT
+  round (if SSH breaks, nothing is lost). stdlib-only."""
 from __future__ import annotations
 
 import json
@@ -40,9 +40,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 MAX_BYTES = int(os.environ.get("AGENT_BUS_SSH_MAX_BYTES", str(4 * 1024 * 1024)))
 MAX_MESSAGES = 200
 MAX_REPLIES = 200
-# DOWNLOAD (fetch) plafonok: egy csere-kör ennyi csatolmány-bájtot ad vissza; a nagyobbat kulon korben, dedikaltan
-# kell kerni. A DL a content-addressed tarbol megy (a sha256 a kepesseg: aki egy neki cimzett uzenetben megkapta a
-# leirot, az le tudja huzni). Az env csak SZUKITHET (mint a bus_enforce-nal).
+# DOWNLOAD (fetch) ceilings: one exchange round returns this many attachment bytes; a larger one must be requested in a separate,
+# dedicated round. The download comes from the content-addressed store (the sha256 is the capability: whoever received the
+# descriptor in a message addressed to them can pull it). The env can only NARROW (as with bus_enforce).
 MAX_FETCH_ITEMS = 32
 MAX_FETCH_BYTES = min(4 * 1024 * 1024, int(os.environ.get("AGENT_BUS_SSH_FETCH_MAX_BYTES", str(4 * 1024 * 1024))))
 _REPLY_KEYS = ("id", "ts", "sender", "topic", "kind", "thread_id", "in_reply_to", "body", "sds")
@@ -54,7 +54,7 @@ _FROM_ENV = object()
 def exchange(identity: str, raw: bytes | str, *, db=None, attach_root=None, notary=_FROM_ENV) -> dict:
     try:
         return _exchange(identity, raw, db=db, attach_root=attach_root, notary=notary)
-    except _NotaryWriteFailed as e:                            # fail-closed: a hátralévő tételek nem mennek át, nincs traceback
+    except _NotaryWriteFailed as e:                            # fail-closed: the remaining items do not go through, no traceback
         return dict(e.args[0], error="notary write failed (fail-closed)")
 
 
@@ -67,27 +67,27 @@ def _exchange(identity, raw, *, db, attach_root, notary):
     import bus_attach
     import bus_notary
 
-    if notary is _FROM_ENV:                                    # v1.5: közjegyzői napló — termék-módban kötelező (fail-closed)
+    if notary is _FROM_ENV:                                    # v1.5: notary log — mandatory in product mode (fail-closed)
         try:
             notary = bus_notary.Notary.from_env(db=db)
         except (bus_notary.NotaryError, OSError, ValueError):
             return {"identity": identity, "error": "notary unavailable (fail-closed)", "processed": False}
 
-    def note(**kw):                                            # csak hash + metaadat; a nyílt test sosem kerül a naplóba
-        # dob → _NotaryWriteFailed; a hívóhelyek a mellékhatás (send / tárba írás / ack / kiadás) ELŐTT hívják
+    def note(**kw):                                            # only hash + metadata; the plaintext body never enters the log
+        # raises → _NotaryWriteFailed; the call sites call it BEFORE the side effect (send / store write / ack / delivery)
         if notary is not None:
             try:
                 e = notary.record(sender_identity=identity, sender_auth="ssh-key", **kw)
             except Exception:
                 raise _NotaryWriteFailed(out)
-            if isinstance(e, dict) and "seq" in e:             # napló-horgony a válaszban: a kör utolsó bejegyzése
+            if isinstance(e, dict) and "seq" in e:             # log anchor in the response: the round's last entry
                 out["notary"] = {"seq": e["seq"], "head_hash": e["entry_hash"]}
 
-    # (2026-09-17): itt PROCESS-GLOBÁLISAN állt AGENT_BUS_AUTO_SIGN=0, és sosem állt vissza. A force-command
-    # rövid életű folyamatában ez láthatatlan volt; egy hosszabb életű hívóban (a CI sweep_log_probe őrszeme ugyanebben a
-    # folyamatban hívja) minden KÉSŐBBI küldés is aláíratlan maradt, amit a termék-mód eldobott. Az elv marad — a
-    # busz-gép kulcsa NEM írja alá a távoli üzenetét —, de HÍVÁS-SZINTEN: az `ab.send(..., sign_key=False)` az auto-signt
-    # is kikapcsolja arra az egy sorra, más folyamat-állapotot nem érint.
+    # (2026-09-17): AGENT_BUS_AUTO_SIGN=0 used to be set here PROCESS-GLOBALLY, and never restored. In the force-command's
+    # short-lived process this was invisible; in a longer-lived caller (the CI sweep_log_probe sentinel calls it in the same
+    # process) every LATER send also stayed unsigned, which product mode dropped. The principle stays — the
+    # bus machine's key does NOT sign the remote party's message —, but PER CALL: `ab.send(..., sign_key=False)` also disables auto-sign
+    # for that one row, and touches no other process state.
     if isinstance(raw, bytes):
         if len(raw) > MAX_BYTES:
             return {"identity": identity, "error": "oversize", "processed": False}
@@ -110,15 +110,15 @@ def _exchange(identity, raw, *, db, attach_root, notary):
 
     ack_to = payload.get("ack")
     if isinstance(ack_to, int) and not isinstance(ack_to, bool) and ack_to > 0:
-        # KIMENŐ IRÁNY, NAPLÓZÁS-ELŐBB: az ack véglegesen elfogyasztja a postát (előre-only
-        # kurzor), ezért a kurzor régi->új értéke a mozgatás ELŐTT kerül a naplóba; naplóhiba -> nincs kurzor-mozgás.
+        # OUTBOUND DIRECTION, LOG-FIRST: the ack permanently consumes the mail (forward-only
+        # cursor), so the cursor's old->new value goes into the log BEFORE the move; a log error -> no cursor move.
         base, tgt = ab.ack_preview(identity, ack_to, db=db)
         note(envelope={"ack": ack_to, "cursor_from": base, "cursor_to": tgt}, recipient=identity, kind="ack",
              decision="accepted", reason="cursor %d->%d (ack %d)" % (base, tgt, ack_to),
              cursor={"from": base, "to": tgt, "ack": ack_to})
         try:
-            ab.ack(identity, ack_to, db=db)                    # az ack előre-only és a valós üzenetekre clamp-el (a busz szabálya)
-        except Exception:                                      # noqa: BLE001 — a kurzor nem mozdult: korrigáló bejegyzés
+            ab.ack(identity, ack_to, db=db)                    # ack is forward-only and clamps to real messages (the bus's rule)
+        except Exception:                                      # noqa: BLE001 — the cursor did not move: a correcting entry
             note(envelope={"ack": ack_to, "cursor_from": base, "cursor_to": tgt}, recipient=identity, kind="ack",
                  decision="rejected", reason="ack_failed")
 
@@ -129,18 +129,18 @@ def _exchange(identity, raw, *, db, attach_root, notary):
                  reason="malformed")
             continue
         claimed = bus_notary.claimed_ts_of(m)
-        # A BEJÖVŐ ÚT NEM NORMALIZÁL A MAGA FEJE SZERINT. Korábban itt `m.get("kind","msg") or "msg"` állt,
-        # ami az elhagyott, az ÜRES és a `null` kindot is `"msg"`-gé tette — miközben az aláírt bájtkép
-        # mindhármat `""`-nek számolja. Egy spec szerint aláíró partner sora ezért `presigned: signature
-        # does not verify (forged or tampered)`-rel bukott: nem csendes elutasítás, HAMISÍTÁS-VÁD.
+        # THE INBOUND PATH DOES NOT NORMALIZE ON ITS OWN. It used to say `m.get("kind","msg") or "msg"` here,
+        # which turned an omitted, an EMPTY and a `null` kind into `"msg"` — while the signed byte image
+        # counts all three as `""`. So a row from a partner signing per spec failed with `presigned: signature
+        # does not verify (forged or tampered)`: not a silent rejection but a FORGERY ACCUSATION.
         kind = ab.canonical_text_field(m.get("kind"))
-        # NAPLÓZÁS-ELŐBB: a fogadás ténye a busz-beszúrás ELŐTT kerül a naplóba. Ha a naplóírás
-        # dob, az ab.send meg sem hívódik (valódi fail-closed, újraküldésnél sincs naplózatlan másolat). Ha a send dob
-        # a naplózás után, egy második, rejected bejegyzés korrigál: túl-naplózás megengedett, alul-naplózás nem.
-        # v1.5.2 (2026-09-21): KLIENS-ALÁÍRT sor. A távoli fél a SAJÁT kulcsával írta alá (`sig`/`pubkey`/`ts` a
-        # message-en), a busz-gép a registry ellen ellenőrzi és PONTOSAN azt tárolja — így a címzett termék-módú
-        # olvasása `signed`-nek látja. Csupasz sor egy PINELT név alatt termék-módban: az olvasó úgyis eldobná
-        # (`unsigned-pinned`), ezért ITT utasítjuk el, OKKAL, hogy a feladó lássa (09-19..21: 25+7064 sor tűnt el némán).
+        # LOG-FIRST: the fact of receipt goes into the log BEFORE the bus insert. If the log write
+        # raises, ab.send is never called (true fail-closed, no unlogged copy on resend either). If send raises
+        # after logging, a second, rejected entry corrects it: over-logging is allowed, under-logging is not.
+        # v1.5.2 (2026-09-21): a CLIENT-SIGNED row. The remote party signed it with ITS OWN key (`sig`/`pubkey`/`ts` on the
+        # message), the bus machine checks it against the registry and stores EXACTLY that — so the recipient's product-mode
+        # read sees it as `signed`. A bare row under a PINNED name in product mode: the reader would drop it anyway
+        # (`unsigned-pinned`), so we reject it HERE, WITH A REASON, so the sender sees it (09-19..21: 25+7064 rows vanished silently).
         presigned = None
         if m.get("sig") is not None or m.get("pubkey") is not None:
             presigned = {"ts": m.get("ts"), "sig": m.get("sig"), "pubkey": m.get("pubkey")}
@@ -151,12 +151,12 @@ def _exchange(identity, raw, *, db, attach_root, notary):
                  claimed_ts=claimed)
             continue
         note(envelope=m, recipient=m["to"], kind=kind, decision="accepted", claimed_ts=claimed)
-        try:                                                   # ANTI-SPOOF: a feladó MINDIG a pinelt identitás
+        try:                                                   # ANTI-SPOOF: the sender is ALWAYS the pinned identity
             rid = ab.send(identity, m["to"], m["body"], topic=ab.canonical_text_field(m.get("topic")),
                           kind=kind, thread_id=m.get("thread_id"),
-                          in_reply_to=m.get("in_reply_to"), db=db, sign_key=False,   # False = NINCS auto-sign sem
+                          in_reply_to=m.get("in_reply_to"), db=db, sign_key=False,   # False = NO auto-sign either
                           presigned=presigned)
-        except Exception as e:                                 # noqa: BLE001 — bármely send-hiba: nem kézbesült, és ez látszik
+        except Exception as e:                                 # noqa: BLE001 — any send error: not delivered, and that shows
             out["rejected"].append({"index": i, "reason": str(e)[:200]})
             note(envelope=m, recipient=m["to"], kind=kind, decision="rejected", reason="send_failed",
                  claimed_ts=claimed)
@@ -168,7 +168,7 @@ def _exchange(identity, raw, *, db, attach_root, notary):
         desc = (a or {}).get("descriptor") if isinstance(a, dict) else None
         sha = desc.get("sha256") if isinstance(desc, dict) else None
         env = desc if isinstance(desc, dict) else {}
-        try:                                                   # tisztán alaki ellenőrzés, a tárhoz még nem nyúl
+        try:                                                   # a purely formal check, does not touch the store yet
             bus_attach.check_descriptor(desc)
             chunks = a.get("chunks") or []
             if not isinstance(chunks, list):
@@ -177,21 +177,21 @@ def _exchange(identity, raw, *, db, attach_root, notary):
             out["attachments"].append({"sha256": sha, "status": "rejected", "reason": str(e)[:200]})
             note(envelope=env, recipient="", kind="attachment", decision="rejected", reason=str(e)[:200])
             continue
-        # NAPLÓZÁS-ELŐBB a csatolmány-ágon is: a tárba írás (partial vagy kész) csak a bejegyzés után történik.
+        # LOG-FIRST on the attachment branch too: writing to the store (partial or complete) happens only after the entry.
         note(envelope=env, recipient="", kind="attachment", decision="accepted", reason="received")
         try:
             done = None
             for ch in chunks:
                 done = store.receive_chunk(desc, ch)
-        except Exception as e:                                 # noqa: BLE001 — nem tárolódott: második, korrigáló bejegyzés
+        except Exception as e:                                 # noqa: BLE001 — not stored: a second, correcting entry
             out["attachments"].append({"sha256": sha, "status": "rejected", "reason": str(e)[:200]})
             note(envelope=env, recipient="", kind="attachment", decision="rejected", reason="store_failed")
             continue
         out["attachments"].append({"sha256": sha, "status": "stored" if done else "partial"})
 
-    # DOWNLOAD (fetch): a kliens leirokat (descriptor) ker, a content-addressed tarbol visszaadjuk a darabokat.
-    # Ez a hianyzo fogado-oldala + a "busz csomagot is szallit" letoltes-iranya. A get() bajtra ellenoriz
-    # (size+sha256, fail-closed). Per-kor plafon: MAX_FETCH_ITEMS db es MAX_FETCH_BYTES ossz-bajt; a nagyot kulon korben.
+    # DOWNLOAD (fetch): the client requests descriptors, we return the chunks from the content-addressed store.
+    # This is the missing receiving side + the download direction of "the bus also carries packages". get() checks byte-exactly
+    # (size+sha256, fail-closed). Per-round ceiling: MAX_FETCH_ITEMS items and MAX_FETCH_BYTES total bytes; a large one in a separate round.
     fetched_bytes = 0
     for desc in (payload.get("fetch") or [])[:MAX_FETCH_ITEMS]:
         sha = desc.get("sha256") if isinstance(desc, dict) else None
@@ -203,14 +203,14 @@ def _exchange(identity, raw, *, db, attach_root, notary):
             note(envelope=env, recipient=identity, kind="fetch", decision="rejected", reason=str(e)[:200])
             continue
         size = desc.get("size") if isinstance(desc.get("size"), int) else 0
-        if fetched_bytes + size > MAX_FETCH_BYTES:             # a nagyot dedikalt korben kell kerni (nem nema csonkolas)
+        if fetched_bytes + size > MAX_FETCH_BYTES:             # a large one must be requested in a dedicated round (not silent truncation)
             out["fetched"].append({"sha256": sha, "status": "deferred", "reason": "round-fetch-budget"})
             note(envelope=env, recipient=identity, kind="fetch", decision="rejected", reason="round-budget")
             continue
         note(envelope=env, recipient=identity, kind="fetch", decision="accepted", reason="requested")
         try:
-            chunks = list(store.chunks(desc))                  # get() bajtra ellenoriz (size+sha256) -> nem-tarolt = AttachmentError
-        except bus_attach.AttachmentError as e:                # nincs a tarban / eltero -> nem talalt (fail-closed)
+            chunks = list(store.chunks(desc))                  # get() checks byte-exactly (size+sha256) -> not stored = AttachmentError
+        except bus_attach.AttachmentError as e:                # not in the store / differs -> not found (fail-closed)
             out["fetched"].append({"sha256": sha, "status": "not-found", "reason": str(e)[:200]})
             note(envelope=env, recipient=identity, kind="fetch", decision="rejected", reason="not-found")
             continue
@@ -219,42 +219,42 @@ def _exchange(identity, raw, *, db, attach_root, notary):
 
     rows = ab.recv(identity, mark=False, limit=MAX_REPLIES, db=db, verify_sds=True)
     _PEND_LIMIT = MAX_REPLIES * 50
-    try:        # a KIADÁSRA VÁRÓ darabszám ÉS az első ki NEM adott id a bizonyítékba is
-        pend_rows = ab.recv(identity, mark=False, limit=_PEND_LIMIT + 1, db=db, verify_sds=True)   # +1 = csonkolás-érzékelő
+    try:        # the number AWAITING DELIVERY and the first UNDELIVERED id also go into the evidence
+        pend_rows = ab.recv(identity, mark=False, limit=_PEND_LIMIT + 1, db=db, verify_sds=True)   # +1 = truncation detector
         pend_ok = True
     except Exception:
-        pend_rows, pend_ok = rows, False          # a mérés HIÁNYÁT ki kell mondani, nem „tiszta kör"-nek látszani
-    # Saját a +1-es érzékelőt eddig senki nem olvasta — a limitbe ütköző mérés CSONKA, és egy
-    # csonka `pending` „tiszta kör"-nek látszott volna. A csonkolás ugyanaz a harmadik állapot, mint a mérés hiánya.
+        pend_rows, pend_ok = rows, False          # the ABSENCE of measurement must be stated, not look like a "clean round"
+    # No one read the +1 detector until now — a measurement hitting the limit is TRUNCATED, and a
+    # truncated `pending` would have looked like a "clean round". Truncation is the same third state as missing measurement.
     pend_truncated = pend_ok and len(pend_rows) > _PEND_LIMIT
     pending = len(pend_rows)
     given_ids = {r.get("id") for r in rows}
     left_ids = [r.get("id") for r in pend_rows if r.get("id") not in given_ids and isinstance(r.get("id"), int)]
-    next_id = min(left_ids) if left_ids else 0        # 0 = nincs kiadatlan: a kurzor szabadon mehet a kiadottakig
+    next_id = min(left_ids) if left_ids else 0        # 0 = nothing undelivered: the cursor may go freely up to the delivered ones
     replies = [{k: r.get(k) for k in _REPLY_KEYS if k in r} for r in rows]
-    # KIMENŐ IRÁNY, NAPLÓZÁS-ELŐBB: a kiadás előtt (1) egy kör-bejegyzés a kurzorral — ha van kiadott válasz, VAGY a kurzor
-    # eltér a legutóbb naplózott körétől (így a busz-gépen, napló nélkül előreugratott kurzor a következő körben
-    # látszik), és (2) válaszonként egy `delivered` bejegyzés; az envelope_sha256 a kiadott dict JCS-hash-e, a távoli fél
-    # újraszámolja (bus_notary reconcile). Bármely naplóhiba -> a válaszok NEM mennek ki.
+    # OUTBOUND DIRECTION, LOG-FIRST: before delivery (1) a round entry with the cursor — if there is a delivered reply, OR the cursor
+    # differs from the last logged round's (so a cursor advanced without logging on the bus machine shows in the next round),
+    # and (2) one `delivered` entry per reply; envelope_sha256 is the JCS hash of the delivered dict, the remote party
+    # recomputes it (bus_notary reconcile). Any log error -> the replies do NOT go out.
     if notary is not None:
         cur = ab.cursor_of(identity, db=db)
-        # a kör-bejegyzés KÖTELEZZE EL MAGÁT a busz audit-láncának fejére —
-        # így az összevetéskor kimondható, meddig kell érnie a MÁSIK nyilvántartás exportjának. Az `audit_head()`
-        # pont erre készült, és eddig egyetlen hívója sem volt: holt kód volt, most élő horgony.
-        # A horgonyt (audit_seq/audit_hash) és a `closes` vállalást a KÖZJEGYZŐ írja bele (bus_notary.record):
-        # az író fél szava nem lehet a bizonyíték önmagáról. Itt már csak a strict-ack állapot utazik.
+        # the round entry COMMITS ITSELF to the head of the bus's audit chain —
+        # so at comparison time it can be stated how far the OTHER record's export must reach. `audit_head()`
+        # was made exactly for this, and until now had no caller: it was dead code, now it is a live anchor.
+        # The anchor (audit_seq/audit_hash) and the `closes` commitment are written in by the NOTARY (bus_notary.record):
+        # the writer's word cannot be the evidence about itself. Only the strict-ack state travels here.
         _anchor = {}
-        # 2026-09-16: a strict ack clamp TERMÉK-MÓDBAN alapértelmezés. A menekülő ajtó
-        # (AGENT_BUS_STRICT_ACK=0) használata NEM lehet néma — a kör-bejegyzés kimondja, hogy ki van kapcsolva.
+        # 2026-09-16: the strict ack clamp is the default IN PRODUCT MODE. Using the escape hatch
+        # (AGENT_BUS_STRICT_ACK=0) must NOT be silent — the round entry states that it is off.
         try:
             _sa_active, _sa_off = ab.strict_ack_state(db)
             if _sa_off:
                 _anchor = dict(_anchor, strict_ack=0)
         except Exception:
-            # (mérve): ez volt az EGYETLEN mechanizmus, ami a kör-bejegyzésbe
-            # beírja, hogy a clamp menekülő ajtaja nyitva volt — és `pass`-szal a tény NÉMÁN elveszett, a kör
-            # pedig megkülönböztethetetlen lett a SZIGORÚ körtől. A saját kommentünk mondta ki fölötte, hogy
-            # „a menekülő ajtó NEM lehet néma". A mérés hiánya harmadik állapot, pont mint a `pending_unknown`.
+            # (measured): this was the ONLY mechanism that writes into the round entry
+            # that the clamp's escape hatch was open — and with `pass` the fact was SILENTLY lost, and the round
+            # became indistinguishable from a STRICT round. Our own comment above it said
+            # "the escape hatch must NOT be silent". Missing measurement is a third state, just like `pending_unknown`.
             _anchor = dict(_anchor, strict_ack_unknown=1)
         _round_logged = bool(replies) or cur != notary.last_round_cursor(identity)
         _round_seq = None
@@ -262,38 +262,38 @@ def _exchange(identity, raw, *, db, attach_root, notary):
             note(envelope={"identity": identity, "cursor": cur,
                            "reply_sha256": [bus_notary.envelope_hash(x) for x in replies]},
                  recipient=identity, kind="pickup", decision="accepted", reason="cursor=%d replies=%d" % (cur, len(replies)),
-                 # A `closes: 1` vállalást a KÖZJEGYZŐ írja bele (bus_notary.record) — az író fél nem hagyhatja el.
+                 # The `closes: 1` commitment is written in by the NOTARY (bus_notary.record) — the writer cannot omit it.
                  cursor=(dict({"at": cur, "replies": len(replies), "pending": pending, "next_id": next_id},
                               **({"pending_truncated": 1} if pend_truncated else {}), **_anchor) if pend_ok
                          else dict({"at": cur, "replies": len(replies), "pending_unknown": 1}, **_anchor)))
-            _round_seq = (out.get("notary") or {}).get("seq")      # a nyitó bejegyzés seq-e: a zárás EZT nevezi meg
+            _round_seq = (out.get("notary") or {}).get("seq")      # the opening entry's seq: the close NAMES this
         for x in replies:
             rid = x.get("id")
             note(envelope=x, recipient=identity, kind="pickup", decision="delivered", reason="id=%s" % rid,
                  cursor=({"id": int(rid)} if isinstance(rid, int) and not isinstance(rid, bool) and rid >= 0 else None))
-    if replies:                                                # a kiadott posta KÉZBESÍTETT (a kurzor nem mozdul)
+    if replies:                                                # the delivered mail is DELIVERED (the cursor does not move)
         try:
             ab.mark_delivered(identity, [x.get("id") for x in replies], db=db)
-        except Exception as e:                                 # az írási hiba NEM néma (mint az ack-ágon)
+        except Exception as e:                                 # a write error is NOT silent (as on the ack branch)
             note(envelope={"identity": identity, "mark_delivered": "failed"}, recipient=identity, kind="pickup",
                  decision="rejected", reason="mark_delivered_failed: %s" % str(e)[:120])
-            # A: ha a jelzés SEM íródik ki, a _NotaryWriteFailed tovább száll -> FAIL-CLOSED válasz,
-            # a posta NEM megy ki (a kliens a következő körben újra kéri). Néma kettős hiba nem maradhat.
-    # TÁMADÁSI MÁTRIX 2.7 (nyitott sor, most zárva): a kör NYITÓ horgonya a kör ELEJÉN íródik, tehát a kör saját
-    # ack-/kiadás-sorait nem köti — egykörös szeleten a busz audit-láncát következetesen újra lehetett láncolni.
-    # A ZÁRÓ bejegyzés MINDEN mellékhatás után megy ki, és a horgonyt a KÖZJEGYZŐ számolja bele.
-    # Fail-open KIMONDVA: itt már nem lehet fail-closed (a posta kiadva, a `mark_delivered` megtörtént) — ha a
-    # záró írás elbukik, azt (a) a válasz `round_close: "failed"` mezője mondja ki a távoli félnek, (b) a
-    # reconcile `audit_round_unclosed` soft-eltérésként látja. Néma nem marad.
-    # …és CSAK akkor, ha volt NYITÓ kör-bejegyzés: a záró horgony ahhoz párosul, nem önálló zaj.
+            # A: if the signal cannot be written EITHER, _NotaryWriteFailed propagates -> a FAIL-CLOSED response,
+            # the mail does NOT go out (the client asks for it again in the next round). No silent double failure may remain.
+    # ATTACK MATRIX 2.7 (open row, now closed): the round's OPENING anchor is written at the START of the round, so it does not bind
+    # the round's own ack/delivery rows — on a single-round slice the bus audit chain could be consistently re-chained.
+    # The CLOSING entry goes out after EVERY side effect, and the NOTARY computes the anchor into it.
+    # Fail-open STATED: it can no longer be fail-closed here (the mail is delivered, `mark_delivered` happened) — if the
+    # closing write fails, (a) the response's `round_close: "failed"` field states it to the remote party, (b)
+    # reconcile sees it as the soft discrepancy `audit_round_unclosed`. It does not stay silent.
+    # …and ONLY if there was an OPENING round entry: the closing anchor pairs with it, it is not standalone noise.
     if notary is not None and locals().get("_round_logged"):
         try:
             note(envelope={"identity": identity, "round_close": 1, "cursor": ab.cursor_of(identity, db=db)},
                  recipient=identity, kind="round_close", decision="accepted",
                  reason="close replies=%d" % len(replies),
-                 # `round_seq`: a zárás MEGNEVEZI, melyik kört zárja (a nem-Claude kar köre: a puszta sorrend
-                 # mellett egy máshonnan való zárás egy záratlan kört „lezártnak" mutathatna). Ha az író fél
-                 # hazudik róla, a párosítás nem jön létre -> hiányzó zárás, nem hamis zöld.
+                 # `round_seq`: the close NAMES which round it closes (the non-Claude arm's round: with mere order
+                 # a close from elsewhere could make an unclosed round look "closed"). If the writer
+                 # lies about it, the pairing does not form -> a missing close, not a false green.
                  cursor=dict({"at": ab.cursor_of(identity, db=db), "replies": len(replies)},
                              **({"round_seq": int(_round_seq)} if isinstance(_round_seq, int) else {})))
         except Exception:
@@ -306,7 +306,7 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     import agent_bus as ab
     identity = argv[0] if argv else ""
-    if not identity or ab._safe_name(identity) != identity:   # az identitás a force-command-ból jön, és fájlnév-biztos
+    if not identity or ab._safe_name(identity) != identity:   # the identity comes from the force-command and is filename-safe
         print(json.dumps({"error": "no or unsafe identity (must come from the force-command argument)", "processed": False}))
         return 2
     raw = sys.stdin.buffer.read(MAX_BYTES + 1)

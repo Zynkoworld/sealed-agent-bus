@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""agent_wake — ébresztési szabályok: SZENT gépelés, SLEEP-SAFE, operátori WAKE. Stdlib-only.
+"""agent_wake — wake rules: SACRED typing, SLEEP-SAFE, operator WAKE. Stdlib-only.
 
-A `bus_poke` (tmux-bökés) és az `agent_bus_watcher` (headless wake) EGY helyről kérdezi meg, szabad-e
-egy agenthez nyúlni. Az élő flottában szerzett szabályok, általánosítva:
+`bus_poke` (tmux poke) and `agent_bus_watcher` (headless wake) ask ONE place whether it is allowed
+to touch an agent. The rules learned in the live fleet, generalized:
 
-1. **A gépelés SZENT.** Az operátor KÖZVETLENÜL is gépel az agentek promptjába. Egy félig beírt, el nem
-   küldött sor fölé írni vagy azt törölni (C-u) adatvesztés — ez egyszer meg is történt. Ezért:
-   - küldés ELŐTT és minden újrapróbálás előtt megnézzük a prompt-sort; ha élő szöveg van benne → NEM küldünk;
-   - SOHA nincs C-u / törlés;
-   - kétség esetén „typed" (fail-safe): egy elmaradt bökés ártalmatlan, egy felülírt parancs nem.
-   A Claude Code halvány (dim, SGR 2) felajánlása NEM gépelés („ghost").
-2. **Dolgozó agentet nem bökünk** (busy-jelek a panel alján, konfigurálható).
-3. **SLEEP-SAFE.** Egy alvó agent panelébe semmi nem megy és headless wake sem indul — akkor sem, ha van
-   olvasatlan üzenete. Marker: globális (mindenki alszik) vagy agentenkénti. A motorok/cronok ettől FUTNAK
-   tovább; a sleep az agentre vonatkozik, nem a gépre.
-4. **Ébreszteni csak az operátor tud.** `operator-wake` / `operator-sleep-safe` kindú busz-üzenet CSAK az
-   engedélyezett operátor-identitásoktól számít (AGENT_WAKE_OPERATORS), és ha a feladónak van registry-kulcsa,
-   az üzenetnek érvényesen aláírtnak kell lennie (A2). Agent magát (vagy mást) NEM ébresztheti.
-5. **NINCS TÖRLÉS.** A WAKE nem törli a markert, hanem a `history/` alá mozgatja (ki, mikor) — auditálható.
+1. **Typing is SACRED.** The operator also types DIRECTLY into the agents' prompts. Writing over a half-typed,
+   unsent line or clearing it (C-u) is data loss — this did happen once. So:
+   - BEFORE sending and before every retry we look at the prompt line; if it has live text in it → we do NOT send;
+   - NEVER a C-u / clearing;
+   - when in doubt, "typed" (fail-safe): a missed poke is harmless, an overwritten command is not.
+   Claude Code's faded (dim, SGR 2) suggestion is NOT typing ("ghost").
+2. **A working agent is not poked** (busy signals at the bottom of the pane, configurable).
+3. **SLEEP-SAFE.** Nothing goes into a sleeping agent's pane and no headless wake starts — even if it has
+   unread messages. Marker: global (everyone sleeps) or per agent. Engines/crons KEEP RUNNING
+   regardless; sleep applies to the agent, not the machine.
+4. **Only the operator can wake.** A bus message of kind `operator-wake` / `operator-sleep-safe` counts ONLY from
+   authorized operator identities (AGENT_WAKE_OPERATORS), and if the sender has a registry key,
+   the message must be validly signed (A2). An agent CANNOT wake itself (or others).
+5. **NO DELETION.** WAKE does not delete the marker, it moves it under `history/` (who, when) — auditable.
 
-Konfiguráció (env):
-  AGENT_WAKE_STATE_DIR   markerek helye (default: <AGENT_BRIDGE_DIR>/state)
-  AGENT_WAKE_OPERATORS   vesszővel elválasztott operátor-identitások (default: üres = senki)
-  AGENT_WAKE_PROMPT_CHAR prompt-jel a panelen (default: ❯)
-  AGENT_WAKE_BUSY        '|'-vel elválasztott busy-jelek (default: esc to interrupt|Compacting|Context limit)
+Configuration (env):
+  AGENT_WAKE_STATE_DIR   location of the markers (default: <AGENT_BRIDGE_DIR>/state)
+  AGENT_WAKE_OPERATORS   comma-separated operator identities (default: empty = no one)
+  AGENT_WAKE_PROMPT_CHAR prompt character on the pane (default: ❯)
+  AGENT_WAKE_BUSY        '|'-separated busy signals (default: esc to interrupt|Compacting|Context limit)
 """
 from __future__ import annotations
 
@@ -50,12 +50,12 @@ def state_dir():
 
 
 def state_dir_warnings(path=None):
-    """A marker-könyvtár bizalmi állapota. -> figyelmeztetés-lista (üres = rendben)
+    """The trust state of the marker directory. -> list of warnings (empty = fine)
 
-    Saját az alvás/ébrenlét markerjeit eddig SEMMI nem védte — aki a könyvtárba írni tud,
-    az egy idegen `X.sleep_safe` létrehozásával CSENDBEN elnémíthat egy agentet, vagy a marker törlésével
-    ébreszthet, és az audit-bejegyzés `by` mezőjét is ő írja. A markerek helye ezért legyen root-tulajdonú és
-    NEM csoport/világ-írható; ha nem az, azt ki kell mondani — nem elhallgatni.
+    Until now NOTHING protected the sleep/wake markers — whoever can write to the directory
+    can SILENTLY mute an agent by creating a foreign `X.sleep_safe`, or wake it by deleting the marker,
+    and they also write the audit entry's `by` field. So the markers' location should be root-owned and
+    NOT group/world-writable; if it is not, that must be stated — not kept quiet.
     """
     path = path or state_dir()
     out = []
@@ -64,15 +64,15 @@ def state_dir_warnings(path=None):
     except OSError:
         return out
     if st.st_uid != 0:
-        out.append("a marker-könyvtár (%s) NEM root-tulajdonú (uid=%d): bárki, aki ide ír, agentet némíthat "
-                   "vagy ébreszthet, és az audit `by` mezőjét is ő írja" % (path, st.st_uid))
+        out.append("the marker directory (%s) is NOT root-owned (uid=%d): anyone who writes here can mute "
+                   "or wake an agent, and also writes the audit `by` field" % (path, st.st_uid))
     if st.st_mode & 0o022:
-        out.append("a marker-könyvtár (%s) csoport/világ-írható (mód=%o)" % (path, st.st_mode & 0o777))
-    #: a verdikt eddig CSAK a levelet nézte, a CSERÉHEZ viszont
-    # elég a SZÜLŐRE írni: `rename(state, state.elrejtve); makedirs(state, 0700)` — a levél jogai
-    # érdektelenek (0o000-val is mérve). Egy root-tulajdonú 0700 levél így TISZTA bizonyítványt kapott egy
-    # világ-írható szülő alatt: ez rosszabb, mint a hiányzó jelzés, mert HAMIS MEGNYUGTATÁS. A lánc tehát a
-    # szülőkön FÖLFELÉ is nézendő — ugyanaz az elv, amit az sshd az authorized_keys-nél alkalmaz.
+        out.append("the marker directory (%s) is group/world-writable (mode=%o)" % (path, st.st_mode & 0o777))
+    #: the verdict used to look ONLY at the leaf, but for a SWAP it is enough
+    # to write to the PARENT: `rename(state, state.hidden); makedirs(state, 0700)` — the leaf's permissions are
+    # irrelevant (measured even with 0o000). A root-owned 0700 leaf thus got a CLEAN certificate under a
+    # world-writable parent: that is worse than a missing signal, because it is FALSE REASSURANCE. So the chain must
+    # also be checked UPWARDS through the parents — the same principle sshd applies to authorized_keys.
     parent = os.path.dirname(os.path.abspath(path))
     seen = set()
     while parent and parent not in seen:
@@ -82,15 +82,15 @@ def state_dir_warnings(path=None):
         except OSError:
             break
         if pst.st_uid != 0:
-            out.append("a marker-könyvtár SZÜLŐJE (%s) NEM root-tulajdonú (uid=%d): a könyvtár átnevezéssel "
-                       "KICSERÉLHETŐ, és a sleep-safe védelem NÉMÁN elvész (a levél jogai ehhez nem "
-                       "számítanak)" % (parent, pst.st_uid))
-        # A STICKY bit (0o1000) megakadályozza IDEGEN bejegyzés átnevezését/törlését — egy sticky, root-tulajdonú
-        # szülő (pl. /tmp) alatt a root-tulajdonú marker-könyvtár NEM cserélhető ki. Ezt megmértük, tehát nem
-        # kiáltunk farkast: a tág jog önmagában csak akkor lelet, ha a sticky bit nincs ott.
+            out.append("the marker directory's PARENT (%s) is NOT root-owned (uid=%d): the directory can be "
+                       "SWAPPED by renaming, and sleep-safe protection is SILENTLY lost (the leaf's permissions do not "
+                       "matter for this)" % (parent, pst.st_uid))
+        # The STICKY bit (0o1000) prevents renaming/deleting a FOREIGN entry — under a sticky, root-owned
+        # parent (e.g. /tmp) the root-owned marker directory CANNOT be swapped. We measured this, so we do not
+        # cry wolf: broad permissions alone are a finding only if the sticky bit is absent.
         if (pst.st_mode & 0o022) and not (pst.st_mode & 0o1000):
-            out.append("a marker-könyvtár SZÜLŐJE (%s) csoport/világ-írható (mód=%o), és NEM sticky: a "
-                       "könyvtár átnevezéssel kicserélhető" % (parent, pst.st_mode & 0o777))
+            out.append("the marker directory's PARENT (%s) is group/world-writable (mode=%o), and NOT sticky: the "
+                       "directory can be swapped by renaming" % (parent, pst.st_mode & 0o777))
         nxt = os.path.dirname(parent)
         if nxt == parent:
             break
@@ -99,7 +99,7 @@ def state_dir_warnings(path=None):
 
 
 def _make_strict_dir(path, mode=0o700):
-    """A teljes láncot mi hozzuk létre, szigorú móddal (a `makedirs(mode=)` csak a LEVÉLRE hat)."""
+    """We create the whole chain ourselves, with a strict mode (`makedirs(mode=)` only affects the LEAF)."""
     path = os.path.abspath(path)
     parts, cur = [], path
     while not os.path.isdir(cur):
@@ -134,10 +134,10 @@ def _safe(agent):
     return s if s and s not in (".", "..") else "x"
 
 
-# ── 1. prompt-állapot (tiszta függvény, a `tmux capture-pane -p -e` kimenetén) ─────────────────
+# ── 1. prompt state (a pure function, on the output of `tmux capture-pane -p -e`) ─────────────────
 def prompt_input_state(pane_text):
-    """A prompt-sor állapota: 'empty' | 'ghost' (csak dim felajánlás) | 'typed' (élő gépelés) | 'dead' (None).
-    Az UTOLSÓ prompt-jeles sort nézi, az escape-eket megtartva, hogy a dim (SGR 2) szöveg felismerhető legyen."""
+    """The prompt line's state: 'empty' | 'ghost' (only a dim suggestion) | 'typed' (live typing) | 'dead' (None).
+    It looks at the LAST line with a prompt character, keeping escapes, so that dim (SGR 2) text can be recognized."""
     if pane_text is None:
         return "dead"
     pc = _prompt_char()
@@ -176,7 +176,7 @@ def prompt_input_state(pane_text):
 
 
 def is_busy(pane_text):
-    """Dolgozik-e az agent (a panel utolsó nem-üres sorai közt busy-jel)."""
+    """Is the agent working (a busy signal among the pane's last non-empty lines)."""
     if not pane_text:
         return False
     plain = _ANSI_ANY.sub("", pane_text)
@@ -190,16 +190,16 @@ def _marker_path(agent=None):
 
 
 def is_asleep(agent):
-    """Alszik-e az agent: globális marker VAGY agentenkénti marker létezik."""
+    """Is the agent asleep: a global marker OR a per-agent marker exists."""
     return os.path.exists(_marker_path(None)) or os.path.exists(_marker_path(agent))
 
 
 def enter_sleep_safe(agent=None, *, by="operator", now=None):
-    """Marker írása (agent=None → mindenki). Tartalom: ki és mikor (audit).
-    A könyvtár SZIGORÚ móddal jön létre (0700); a meglévő, tág jogú könyvtárra a `state_dir_warnings` szól."""
-    # (mérve): az `os.makedirs(..., mode=)` a KÖZTES szinteket mode NÉLKÜL hozza létre,
-    # tehát `umask 0002` alatt a saját kódunk állította elő a előfeltételét (szülő 0775, levél 0700).
-    # A láncot magunk építjük, szigorú móddal — a meglévő könyvtárak jogait NEM írjuk át (az üzemeltetőé).
+    """Write the marker (agent=None → everyone). Content: who and when (audit).
+    The directory is created with a STRICT mode (0700); `state_dir_warnings` speaks up about an existing, broadly permissioned directory."""
+    # (measured): `os.makedirs(..., mode=)` creates the INTERMEDIATE levels WITHOUT the mode,
+    # so under `umask 0002` our own code produced the precondition (parent 0775, leaf 0700).
+    # We build the chain ourselves, with a strict mode — we do NOT rewrite the permissions of existing directories (they are the operator's).
     _make_strict_dir(state_dir())
     p = _marker_path(agent)
     tmp = p + ".tmp"
@@ -210,8 +210,8 @@ def enter_sleep_safe(agent=None, *, by="operator", now=None):
 
 
 def wake_up(agent=None, *, by="operator", now=None):
-    """WAKE: a markert NEM töröljük, hanem history/ alá mozgatjuk (ki ébresztett, mikor). agent=None → globális
-    marker + minden agentenkénti marker. Visszaadja a mozgatott markerek számát."""
+    """WAKE: we do NOT delete the marker, we move it under history/ (who woke it, when). agent=None → the global
+    marker + every per-agent marker. Returns the number of markers moved."""
     hist = os.path.join(state_dir(), "history")
     ts = int(now if now is not None else time.time())
     targets = [_marker_path(agent)]
@@ -228,11 +228,11 @@ def wake_up(agent=None, *, by="operator", now=None):
     return moved
 
 
-# ── 4. operátori parancs a buszról ───────────────────────────────────────────────────────────
+# ── 4. operator command from the bus ─────────────────────────────────────────────────────────
 def handle_operator_message(msg, *, verify=None, has_key=None):
-    """Egy recv-elt busz-sor feldolgozása. Csak KIND_WAKE / KIND_SLEEP kindot néz; minden más → None.
-    Visszaad: 'woke' | 'slept' | 'ignored:<ok>'. `verify(msg)` → 'signed'|'unsigned'|'forged' (default: agent_bus.verify_sender).
-    Body: üres/"all" → mindenki; egyébként JSON {"agents": [...]} vagy egyetlen agent-név."""
+    """Process a recv'd bus row. Looks only at KIND_WAKE / KIND_SLEEP kinds; everything else → None.
+    Returns: 'woke' | 'slept' | 'ignored:<reason>'. `verify(msg)` → 'signed'|'unsigned'|'forged' (default: agent_bus.verify_sender).
+    Body: empty/"all" → everyone; otherwise JSON {"agents": [...]} or a single agent name."""
     kind = msg.get("kind")
     if kind not in (KIND_WAKE, KIND_SLEEP):
         return None
@@ -246,15 +246,15 @@ def handle_operator_message(msg, *, verify=None, has_key=None):
             has_key = agent_bus._a2_load_registry_pubkey(sender, agent_bus.KEYS_DIR) is not None
     elif has_key is None:
         has_key = True
-    # kulcs nélküli operátor-név puszta sender-stringgel megszemélyesíthető — ez az EGYETLEN kapu
-    # a wake/sleep-parancsra, ezért alapból NEM fogadjuk el. Fejlesztői kivétel csak explicit kapcsolóval.
+    # a keyless operator name can be impersonated with a bare sender string — this is the ONLY gate
+    # for the wake/sleep command, so by default we do NOT accept it. A developer exception only with an explicit switch.
     if not has_key and os.environ.get("AGENT_WAKE_ALLOW_KEYLESS_OPERATOR") != "1":
         return "ignored:operator-no-key"
     if not has_key:
-        # Saját ez a kapcsoló aláírás nélkül enged ébresztést. Létezhet (üzemeltetői döntés),
-        # de a HASZNÁLATA nem lehet néma — a hívó lássa, hogy aláírás-ellenőrzés NÉLKÜL fogadtuk el.
-        sys.stderr.write("agent_wake: FIGYELEM — AGENT_WAKE_ALLOW_KEYLESS_OPERATOR=1: az operátor-üzenetet "
-                         "ALÁÍRÁS NÉLKÜL fogadtuk el (%s)\n" % sender)
+        # this switch allows waking without a signature. It may exist (an operator decision),
+        # but its USE must not be silent — the caller must see that we accepted it WITHOUT a signature check.
+        sys.stderr.write("agent_wake: WARNING — AGENT_WAKE_ALLOW_KEYLESS_OPERATOR=1: the operator message was accepted "
+                         "WITHOUT A SIGNATURE (%s)\n" % sender)
     auth = verify(msg)
     if auth == "forged" or (has_key and auth != "signed"):
         return "ignored:bad-signature"
@@ -262,7 +262,7 @@ def handle_operator_message(msg, *, verify=None, has_key=None):
     if targets is None:
         return "ignored:bad-body"
     if sender in [t for t in targets if t is not None]:
-        return "ignored:self"                                   # agent/operátor magát nem ébreszti/altatja így
+        return "ignored:self"                                   # an agent/operator does not wake/sleep itself this way
     for t in targets:
         if kind == KIND_WAKE:
             wake_up(t, by=sender)
@@ -285,8 +285,8 @@ def _targets(body):
             return None
         if agents == "all":
             return [None]
-        # a JSON-ág ugyanazt a szigorú névszabályt kapja, mint a sima string — különben egy
-        # 300 bájtos név fájlnév-hibával (ENAMETOOLONG) leállította a watchert.
+        # the JSON branch gets the same strict name rule as the plain string — otherwise a
+        # 300-byte name stopped the watcher with a filename error (ENAMETOOLONG).
         if (not isinstance(agents, list) or not agents
                 or not all(isinstance(a, str) and _AGENT_NAME.fullmatch(a) for a in agents)):
             return None
@@ -294,7 +294,7 @@ def _targets(body):
     return [b] if _AGENT_NAME.fullmatch(b) else None
 
 
-# ── 1+2. biztonságos küldés a panelbe ──────────────────────────────────────────────────────────
+# ── 1+2. safe sending into the pane ──────────────────────────────────────────────────────────
 def _default_run(argv):
     return subprocess.run(argv, capture_output=True, text=True, timeout=5)
 
@@ -309,7 +309,7 @@ def capture(target, *, run=None):
 
 
 def may_poke(agent, target, *, run=None):
-    """Szabad-e most a panelbe írni? → (bool, ok). Sorrend: sleep-safe → halott panel → dolgozik → gépelés."""
+    """Is it allowed to write into the pane now? → (bool, reason). Order: sleep-safe → dead pane → working → typing."""
     if is_asleep(agent):
         return False, "sleep-safe"
     pane = capture(target, run=run)
@@ -324,10 +324,10 @@ def may_poke(agent, target, *, run=None):
 
 
 def safe_send(agent, target, text, *, run=None, settle=None):
-    """FIX szöveg + Enter a panelbe, a szent-gépelés szabállyal. SOHA nincs C-u, és nincs vak újrapróbálás.
-    Küldés ELŐTT ellenőriz (sleep-safe/halott/dolgozik/gépel). Utána: ha a prompt üres vagy az agent dolgozik →
-    'sent'; ha szöveg ragadt a promptban → 'stuck' (NEM töröljük: lehet, hogy közben az operátor is gépelt).
-    Visszaad: 'sent' | 'stuck' | 'error' | a may_poke tiltó oka."""
+    """FIXED text + Enter into the pane, with the sacred-typing rule. NEVER a C-u, and no blind retry.
+    Checks BEFORE sending (sleep-safe/dead/working/typing). Afterwards: if the prompt is empty or the agent is working →
+    'sent'; if text got stuck in the prompt → 'stuck' (we do NOT clear it: the operator may have typed meanwhile).
+    Returns: 'sent' | 'stuck' | 'error' | may_poke's refusing reason."""
     run = run or _default_run
     settle = settle if settle is not None else (lambda: time.sleep(1))
     ok, why = may_poke(agent, target, run=run)

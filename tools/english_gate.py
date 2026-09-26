@@ -29,14 +29,26 @@ STOPWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Identifiers and product names that are allowed verbatim. Removed from a line
-# (exact, case-sensitive, longest first) before the checks run.
+# Identifiers and product names allowed verbatim everywhere (exact, case-sensitive).
 ALLOWLIST = ("Zynko", "zafire", "korpusz_sema", "parositas", "pr_gomb")
-# Non-ASCII test vectors that must stay byte-identical: the signed conformance
-# vector in docs/AGENT_BUS_SCHEMA.md (its sha256 and signatures cover these bytes)
-# and a UTF-8 round-trip input in test_poke_hardening_20260916.py.
-TEST_VECTORS = ("árvíztűrő tükörfúrógép\\tvége", "árvíztűrő")
-_REMOVE = tuple(sorted(ALLOWLIST + TEST_VECTORS, key=len, reverse=True))
+
+# Byte-identical Hungarian test vectors, allowed ONLY in the named file. Each is data
+# the test (or a signature/hash) depends on; translating it would change test logic.
+FILE_VECTORS = {
+    # signed conformance vector: the doc's sha256, byte length and Ed25519 signatures cover it
+    "docs/AGENT_BUS_SCHEMA.md": ("árvíztűrő",),
+    "test_schema_doc_signed_shape.py": ("árvíztűrő",),
+    # UTF-8 round-trip input for bus_poke._safe
+    "test_poke_hardening_20260916.py": ("árvíztűrő tükörfúrógép\\tvége",),
+    # leak-scanner regex inputs: Hungarian case endings, protocol vocabulary, invalid version
+    "product/test_product_packaging.py": (
+        "Licensor:  Examplesoft (Ödönyi Elek and Kovács Elek Pál)",
+        "a kör-bejegyzés round_seq mezője", "round2 az ack-ablakban", "HIGH-2: a mérés hiánya",
+        "lásd [[valami-jegyzet]]", "lásd #1234", "Válasz Ödönnek", "Kovács Elek", "Ödönyi",
+        "Ödönnek", "Ödöntől", "Ödönnel", "Ödön_key", "Ödön", "nem-verzio",
+    ),
+}
+
 
 EXCLUDED_DIRS = ("docs/internal-hu",)
 SELF = "tools/english_gate.py"
@@ -62,9 +74,10 @@ def read_text(path):
         return None
 
 
-def line_hits(line):
+def line_hits(line, rel=""):
     stripped = line
-    for token in _REMOVE:
+    tokens = ALLOWLIST + FILE_VECTORS.get(rel, ())
+    for token in sorted(tokens, key=len, reverse=True):
         stripped = stripped.replace(token, "")
     return bool(ACCENTED.search(stripped) or STOPWORD_RE.search(stripped))
 
@@ -84,7 +97,7 @@ def scan(root):
             if text is None:
                 continue
             for lineno, line in enumerate(text.splitlines(), 1):
-                if line_hits(line):
+                if line_hits(line, rel):
                     findings.append((rel, lineno, line.strip()))
     return findings
 
