@@ -32,9 +32,17 @@ STOPWORD_RE = re.compile(
 # Identifiers and product names allowed verbatim everywhere (exact, case-sensitive).
 ALLOWLIST = ("Zynko", "zafire", "korpusz_sema", "parositas", "pr_gomb")
 
-# Byte-identical Hungarian test vectors, allowed ONLY in the named file. Each is data
-# the test (or a signature/hash) depends on; translating it would change test logic.
+# Byte-identical Hungarian literals, allowed ONLY in the named file: test vectors the test (or a
+# signature/hash) depends on, and match strings that read the Hungarian internal notes. Translating
+# any of them would change test logic or behaviour.
 FILE_VECTORS = {
+    # the leak scanner's own Hungarian regex alternatives (a pattern holder; code, not prose)
+    "product/release_preflight.py": (
+        "t[áa]mad[óo]k[öo]r", "k[óo]dn[ée]v",
+        "t[óo]l|t[őo]l|r[óo]l|r[őo]l", "n[áa]l|n[ée]l|ra|re|[ée]k|[ée]",
+    ),
+    # row keywords of docs/internal-hu/TAMADASI_MATRIX_v1.5.md (closed / refuted / open)
+    "docs_bind_probe.py": ("ZÁRVA", "CÁFOLVA", "NYITVA"),
     # signed conformance vector: the doc's sha256, byte length and Ed25519 signatures cover it
     "docs/AGENT_BUS_SCHEMA.md": ("árvíztűrő",),
     "test_schema_doc_signed_shape.py": ("árvíztűrő",),
@@ -43,8 +51,10 @@ FILE_VECTORS = {
     # leak-scanner regex inputs: Hungarian case endings, protocol vocabulary, invalid version
     "product/test_product_packaging.py": (
         "Licensor:  Examplesoft (Ödönyi Elek and Kovács Elek Pál)",
-        "a kör-bejegyzés round_seq mezője", "round2 az ack-ablakban", "HIGH-2: a mérés hiánya",
-        "lásd [[valami-jegyzet]]", "lásd #1234", "Válasz Ödönnek", "Kovács Elek", "Ödönyi",
+        "a kör-bejegyzés round_seq mezője", "round2 az ack-ablakban",
+        # three of the leak-scanner inputs (a cross-reference, a ticket number and a severity label)
+        # are allowlisted by their Hungarian fragment only, so this file carries no leak shape itself
+        "a mérés hiánya", "lásd", "Válasz Ödönnek", "Kovács Elek", "Ödönyi",
         "Ödönnek", "Ödöntől", "Ödönnel", "Ödön_key", "Ödön", "nem-verzio",
     ),
 }

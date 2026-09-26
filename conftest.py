@@ -1,41 +1,41 @@
-"""Pytest-konfiguráció: a KIMONDOTT, MÉRT korlátok listája — és miért nem a szonda átírása a válasz.
+"""Pytest configuration: the list of STATED, MEASURED limits — and why rewriting the probe is not the answer.
 
-A partner-írt szondák közül kettő SZÁNDÉKOSAN piros. A `ClampLiedFields` azt méri, hogy a kör-bejegyzés
-`pending`/`next_id` mezője a vádlott ÖNBEVALLÁSA, és a közjegyzői napló ÖNMAGÁBAN nem cáfolja. Ez igaz, és
-a szonda pontosan ezt a határt rögzíti — nem hiba, hanem bizonyíték.
+Two of the partner-written probes are DELIBERATELY red. `ClampLiedFields` measures that the round entry's
+`pending`/`next_id` field is the accused's SELF-REPORT, and the notary log ON ITS OWN does not refute it. This is true, and
+the probe pins exactly this boundary — it is not a bug but evidence.
 
-Miért nem írjuk át a szondát: a partner fájljai SZÓ SZERINT szállnak, mert az teszi őket bizonyítékká, hogy
-nem mi írtuk. Egy „javítás" a fájlban megszüntetné a bizonyíték-értéküket. Ezért a korlátot itt, a futtató
-oldalán mondjuk ki, a fájl egyetlen bájtjának érintése nélkül.
+Why we do not rewrite the probe: the partner's files ship VERBATIM, because that is what makes them evidence —
+we did not write them. A "fix" in the file would destroy their evidentiary value. So the limit is stated here, on the runner's
+side, without touching a single byte of the file.
 
-Miért nem `skip`: a kihagyott teszt nem mér semmit, és némán az is maradna, ha a korlát közben megszűnne.
-A `strict` xfail ennek az ELLENTÉTE: amíg a korlát áll, a szonda pirosa VÁRT; ha viszont egyszer csak
-átmenne, a suite PIROSRA vált, és rákérdez, hogy mi változott. Egy kimondott korlát így nem alszik el.
+Why not `skip`: a skipped test measures nothing, and would stay silent even if the limit went away meanwhile.
+A `strict` xfail is the OPPOSITE of that: while the limit stands, the probe's red is EXPECTED; but if it ever
+passed, the suite turns RED and asks what changed. So a stated limit does not fall asleep.
 
-A korlát LEZÁRÁSA egy réteggel feljebb megvan és mérve van: `test_clamp_lied_with_audit_20260916.py`
-ugyanezt a forgatókönyvet futtatja a busz saját, hash-láncolt `cursor_audit` exportjával, és mindkét
-hazugság `audit_skipped_contradicts_log` (hard) verdiktet kap. A clamp tehát NEM kapcsolható ki egyetlen
-hazug számmal, ha az összevetés fut — csak a naplóval egyedül nem cáfolható.
+The CLOSURE of the limit exists one layer up and is measured: `test_clamp_lied_with_audit_20260916.py`
+runs the same scenario with the bus's own hash-chained `cursor_audit` export, and both
+lies get the `audit_skipped_contradicts_log` (hard) verdict. So the clamp CANNOT be defeated with a single
+lying number if the comparison runs — it just cannot be refuted with the log alone.
 """
 import pytest
 
-# node-id -> miért várt a pirosa, és hol van a lezárása
+# node-id -> why its red is expected, and where it is closed
 EXPECTED_LIMITS = {
     "test_joint_delivery_outcome.py::ClampLiedFields::test_lied_next_id_must_not_defeat_the_clamp":
-        "a kör-bejegyzés next_id-je önbevallás; a naplóval egyedül nem cáfolható "
-        "(lezárás: test_clamp_lied_with_audit_20260916.py, bus_audit-tal)",
+        "the round entry's next_id is a self-report; it cannot be refuted with the log alone "
+        "(closed by: test_clamp_lied_with_audit_20260916.py, with bus_audit)",
     "test_joint_delivery_outcome.py::ClampLiedFields::test_lied_pending_must_not_defeat_the_clamp":
-        "a kör-bejegyzés pending-je önbevallás; a naplóval egyedül nem cáfolható "
-        "(lezárás: test_clamp_lied_with_audit_20260916.py, bus_audit-tal)",
+        "the round entry's pending is a self-report; it cannot be refuted with the log alone "
+        "(closed by: test_clamp_lied_with_audit_20260916.py, with bus_audit)",
 }
 
 
 def _is_full_run(config):
-    """Igaz, ha a futás a TELJES suite — csak akkor mond valamit a "nem gyűjtött" tény.
+    """True if the run is the FULL suite — only then does the fact "not collected" say anything.
 
-    Az első változat mindig ellenőrzött, és egy egyetlen fájlra szűkített futást HIBÁRA vitt: ott a szondák
-    jogosan nincsenek a gyűjtésben. Egy őr, ami a szűkítést defektnek nézi, a fejlesztőt tanítja meg
-    megkerülni magát — és attól kezdve a valódi eset sem tűnik fel."""
+    The first version always checked, and failed a run narrowed to a single file: there the probes are
+    legitimately not collected. A guard that treats narrowing as a defect teaches the developer to
+    bypass it — and from then on the real case goes unnoticed too."""
     if getattr(config.option, "keyword", None) or getattr(config.option, "markexpr", None):
         return False
     args = [a for a in (config.args or []) if not a.startswith("-")]
@@ -52,7 +52,7 @@ def pytest_collection_modifyitems(config, items):
                 seen.add(nodeid)
     missing = sorted(set(EXPECTED_LIMITS) - seen)
     if missing and _is_full_run(config):
-        # Egy node-id, ami már nem létezik, néma kivételként élne tovább: a szondát átnevezték vagy törölték,
-        # és a "várt piros" innentől semmit nem takar. Ez hangos hiba, nem elnézhető elírás — de csak teljes
-        # futáson, mert egy szűkített futáson a hiányzás a szűkítés következménye, nem lelet.
-        raise pytest.UsageError("conftest: nem gyűjtött, de kimondott korlát: %s" % ", ".join(missing))
+        # A node id that no longer exists would live on as a silent exception: the probe was renamed or deleted,
+        # and from then on the "expected red" covers nothing. This is a loud error, not a forgivable typo — but only on a full
+        # run, because on a narrowed run the absence is a consequence of the narrowing, not a finding.
+        raise pytest.UsageError("conftest: a stated limit that was not collected: %s" % ", ".join(missing))

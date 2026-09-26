@@ -27,12 +27,12 @@ def sha256_file(path: str) -> str:
 
 
 def walk_tree(tree: str):
-    """A fa szállított fájljai. A SKIP nevek FÁJLKÉNT is kimaradnak, nem csak könyvtárként.
+    """The tree's shipped files. The SKIP names are skipped AS FILES too, not only as directories.
 
-    Egy git WORKTREE-ben a `.git` nem könyvtár, hanem egy fájl (`gitdir: …`). Az első változat csak a
-    könyvtárakat szűrte, ezért a fő checkoutban évekig helyesen működött, egy worktree-ben viszont a `.git`
-    fájlként bejárásra került, és az integritás-fejezet „.git: not in the manifest"-tel bukott. Környezet-
-    függő verifikáló-hiba: nem a fa volt más, hanem az, hogy honnan néztük."""
+    In a git WORKTREE `.git` is not a directory but a file (`gitdir: …`). The first version only filtered
+    directories, so in the main checkout it worked correctly for years, but in a worktree `.git`
+    got walked as a file, and the integrity chapter failed with ".git: not in the manifest". An environment-
+    dependent verifier bug: the tree was not different, only where we looked from."""
     for root, dirs, files in os.walk(tree):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
         for name in sorted(files):

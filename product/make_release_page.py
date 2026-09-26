@@ -35,7 +35,7 @@ def read_json(path, what):
 
 
 def readme_section(title):
-    """A README egy szakasza — hogy az oldal ne mondjon mást, mint a csomagban lévő szöveg."""
+    """A section of the README — so the page says nothing different from the text in the package."""
     src = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
     m = re.search(r"^## %s\s*$(.*?)(?=^## )" % re.escape(title), src, re.M | re.S)
     return (m.group(1).strip() if m else "")
@@ -60,9 +60,9 @@ def chapter_rows(claims, external):
 
 
 def envelope_drift(man):
-    """A kérdés nem az, hogy melyik commit — hanem hogy a boríték A SZÁLLÍTOTT FÁT írja-e le. Ezt a manifest
-    fájl-hash-eivel mérjük (ugyanaz az ellenőrzés, amit a vevő futtat), nem git-tel: így egy git nélküli másolaton,
-    és a vevő gépén is ugyanaz a válasz."""
+    """The question is not which commit — but whether the envelope describes THE SHIPPED TREE. We measure that with the manifest's
+    file hashes (the same check the buyer runs), not with git: so on a copy without git, and on the
+    buyer's machine, the answer is the same."""
     problems = ev.check_manifest(TREE, man)
     if problems:
         return "; ".join("%s: %s" % (p["file"], p["problem"]) for p in problems[:4])

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""sds_envelope — SDS bizonyítékos boríték a buszon (a partner-kar három additív lépése, 2026-09-14). Stdlib + opcionális cryptography.
+"""sds_envelope — the SDS evidential envelope on the bus (the partner arm's three additive steps, 2026-09-14). Stdlib + optional cryptography.
 
-A busz SZÁLLÍT és ÉBRESZT; az SDS (capsule2-spec, capsule-sync v2) megmondja, mi egy érvényes, bizonyítható üzenet.
-Ez a modul a kettő közti híd — NEM az SDS referencia-verifikátora, és nem pótolja a két kar kereszt-ellenőrzését:
+The bus TRANSPORTS and WAKES; SDS (capsule2-spec, capsule-sync v2) says what a valid, provable message is.
+This module is the bridge between the two — it is NOT SDS's reference verifier, and it does not replace the two arms' cross-check:
 
-1. `send --kind sds-envelope`: a body egy keretezett pár `{"record": …, "envelope": …}` (SPEC §5.5 „Combined framing").
-   Küldéskor csak a SZERKEZET kötött (check_framed_shape) — hibás keret nem kerül a buszra.
-2. `recv --verify-sds`: soronként `valid | invalid(<ok>) | unsigned | unverifiable(<ok>)`.
-   - Ha az AGENT_BUS_SDS_VALIDATOR / CAPSULE2_SDS_VALIDATOR env `modul:függvény`-t nevez meg, AZ dönt
-     (pl. a capsule2 referencia-verifikátor köré írt adapter). Hívás: fn(framed_dict, context_dict) → (status, ok) | status.
-   - Különben a beépített MINIMÁLIS ellenőrzés fut (lent), szűk JCS-profillal.
-3. Kormányzás-híd: a busz `keys/<sender>.pub` registry-je köti a feladót a kulcshoz; egy helyi admission-fájl
-   mondja meg, ki lehet feladó és milyen org/role-lal. Nem beengedett feladó → invalid(not-admitted);
-   a registry-kulcs ≠ a beengedett issuer → invalid(key-mismatch).
+1. `send --kind sds-envelope`: the body is a framed pair `{"record": …, "envelope": …}` (SPEC §5.5 "Combined framing").
+   On send only the STRUCTURE is bound (check_framed_shape) — a malformed frame does not reach the bus.
+2. `recv --verify-sds`: per row `valid | invalid(<reason>) | unsigned | unverifiable(<reason>)`.
+   - If the AGENT_BUS_SDS_VALIDATOR / CAPSULE2_SDS_VALIDATOR env names a `module:function`, THAT decides
+     (e.g. an adapter written around the capsule2 reference verifier). Call: fn(framed_dict, context_dict) → (status, reason) | status.
+   - Otherwise the built-in MINIMAL check runs (below), with a narrow JCS profile.
+3. Governance bridge: the bus's `keys/<sender>.pub` registry binds the sender to the key; a local admission file
+   says who may be a sender and with what org/role. A sender not admitted → invalid(not-admitted);
+   the registry key ≠ the admitted issuer → invalid(key-mismatch).
 
-Admission-fájl (a busz HELYI nézete a §5.4 admitted-set kötésről; NEM a JOINT genezis-lánc ellenőrzése):
-  {"config_id": "sha256:<64hex>", "domain_hash": "<64hex>" (opcionális),
-   "admitted": [{"sender": "<busz-identitás>", "issuer": "<ed25519 pubkey 64hex>", "org": "...", "role": "..."}]}
+Admission file (the bus's LOCAL view of the §5.4 admitted-set binding; NOT a check of the JOINT genesis chain):
+  {"config_id": "sha256:<64hex>", "domain_hash": "<64hex>" (optional),
+   "admitted": [{"sender": "<bus identity>", "issuer": "<ed25519 pubkey 64hex>", "org": "...", "role": "..."}]}
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ import re
 import unicodedata
 
 KIND = "sds-envelope"
-DOM_AUTH = b"capsule-sync/auth/v1"                         # SPEC §5: az EGY domain-szeparációs konstans
-_ENVELOPE_KEYS = {"record_id", "config_id", "domain", "domain_hash", "epoch", "sigs"}   # SPEC §5.5: zárt objektum
+DOM_AUTH = b"capsule-sync/auth/v1"                         # SPEC §5: the ONE domain-separation constant
+_ENVELOPE_KEYS = {"record_id", "config_id", "domain", "domain_hash", "epoch", "sigs"}   # SPEC §5.5: a closed object
 _DOMAIN_KEYS = {"project", "stream", "repo"}
 _SLUG = re.compile(r"^[a-z0-9._:-]{1,64}$")
 _H64 = re.compile(r"^[0-9a-f]{64}$")
@@ -40,11 +40,11 @@ _SAFE_INT = 2 ** 53 - 1
 try:
     from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
     HAVE_CRYPTO = True
-except Exception:                                           # pragma: no cover - környezet-függő
+except Exception:                                           # pragma: no cover - environment-dependent
     HAVE_CRYPTO = False
 
 
-# ── SPEC §1: kanonikus forma (RFC 8785 JCS profil — szűk: egész számok, sztringek, literálok, tömbök, objektumok) ──
+# ── SPEC §1: canonical form (RFC 8785 JCS profile — narrow: integers, strings, literals, arrays, objects) ──
 def _jcs_str(s):
     out = ['"']
     for ch in s:
@@ -58,13 +58,13 @@ def _jcs_str(s):
         elif o < 0x20:
             out.append("\\u%04x" % o)
         else:
-            out.append(ch)                                  # U+007F és minden más szó szerint; nincs normalizálás
+            out.append(ch)                                  # U+007F and everything else verbatim; no normalization
     out.append('"')
     return "".join(out)
 
 
 def jcs(value):
-    """Kanonikus UTF-8 bájtok. Objektum-kulcsok UTF-16 kódegység-sorrendben; float → ValueError (a profil csak egészet ismer)."""
+    """Canonical UTF-8 bytes. Object keys in UTF-16 code-unit order; float → ValueError (the profile knows only integers)."""
     def enc(v):
         if v is None:
             return "null"
@@ -95,14 +95,14 @@ def record_id_of(record):
     return "sha256:" + hashlib.sha256(jcs(body)).hexdigest()
 
 
-# ── 1. lépés: a keret szerkezete (küldéskor) ─────────────────────────────────────────────────────
+# ── step 1: the frame's structure (on send) ─────────────────────────────────────────────────────
 def _no_float(obj):
     return json.loads(obj, parse_float=lambda s: (_ for _ in ()).throw(ValueError("non-integer number")))
 
 
 def parse_framed(body):
-    """A body → (record, envelope). Hibás szerkezet → ValueError('<ok>'). Az üres `sigs` itt MEGENGEDETT
-    (a verify 'unsigned'-ként jelzi); minden más a SPEC §5.5 zárt/korlátos alakját követi."""
+    """The body → (record, envelope). A malformed structure → ValueError('<reason>'). An empty `sigs` is ALLOWED here
+    (verify flags it as 'unsigned'); everything else follows the closed/bounded shape of SPEC §5.5."""
     try:
         framed = _no_float(body) if isinstance(body, str) else body
     except ValueError as e:
@@ -140,11 +140,11 @@ def parse_framed(body):
 
 
 def check_framed_shape(body):
-    """A `send` kapuja: hibás keret → ValueError (a busz nem fogadja el)."""
+    """The `send` gate: a malformed frame → ValueError (the bus does not accept it)."""
     parse_framed(body)
 
 
-# ── 2. lépés: ellenőrzés a fogadó oldalon ────────────────────────────────────────────────────────
+# ── step 2: checking on the receiving side ──────────────────────────────────────────────────────
 def signed_message(env, role, org):
     """SPEC §5: DOM_AUTH ‖ record_id(32) ‖ config_id(32) ‖ domain_hash(32) ‖ len(role)‖role ‖ epoch_be8 ‖ len(org)‖org."""
     r, o = role.encode("utf-8"), org.encode("utf-8")
@@ -177,7 +177,7 @@ def _external_validator():
 
 
 def verify(body, *, sender, admission=None, registry_pubkey=None):
-    """Egy sds-envelope busz-sor osztályozása → (status, ok). status: 'valid'|'invalid'|'unsigned'|'unverifiable'."""
+    """Classify an sds-envelope bus row → (status, reason). status: 'valid'|'invalid'|'unsigned'|'unverifiable'."""
     try:
         rec, env = parse_framed(body)
     except ValueError as e:
@@ -186,9 +186,9 @@ def verify(body, *, sender, admission=None, registry_pubkey=None):
         ext = _external_validator()
     except Exception:
         return "unverifiable", "validator-import"
-    # Saját a külső validátor eddig EGYEDÜL döntött, és egy env-változóból tetszőleges modul
-    # betölthető (`AGENT_BUS_SDS_VALIDATOR=rogue:ok`) — aláírás, admission, minden megkerülhető volt. Mostantól a
-    # BEÉPÍTETT ellenőrzés fut ELŐBB, és a külső CSAK SZIGORÍTHAT: a `valid`-ot lerontja, de nem hozhatja létre.
+    # The external validator used to decide ALONE, and an arbitrary module could be loaded from an env variable
+    # (`AGENT_BUS_SDS_VALIDATOR=rogue:ok`) — signature, admission, everything could be bypassed. From now on the
+    # BUILT-IN check runs FIRST, and the external one can ONLY TIGHTEN: it can downgrade `valid`, but cannot create it.
     base_status, base_why = _builtin_verify(rec, env, sender, admission, registry_pubkey)
     if ext is None:
         return base_status, base_why
@@ -200,29 +200,29 @@ def verify(body, *, sender, admission=None, registry_pubkey=None):
         return "unverifiable", "validator-error"
     ext_status, ext_why = ((res, "") if isinstance(res, str) else (res[0], res[1] if len(res) > 1 else ""))
     if base_status != "valid":
-        return base_status, base_why                       # a külső nem írhatja felül a beépített elutasítást
+        return base_status, base_why                       # the external one cannot overwrite the built-in rejection
     if ext_status != "valid":
         return ext_status, ext_why or "external"
     return "valid", ""
 
 
 def _builtin_verify(rec, env, sender, admission, registry_pubkey):
-    """A beépített, minimális ellenőrzés (szűk JCS-profil). -> (status, ok)"""
+    """The built-in, minimal check (narrow JCS profile). -> (status, reason)"""
     if not env["sigs"]:
         return "unsigned", "no-sigs"
     try:
         if record_id_of(rec) != env["record_id"]:
-            return "invalid", "record-id-mismatch"            # SPEC §2 újraszámolva
+            return "invalid", "record-id-mismatch"            # SPEC §2 recomputed
     except ValueError:
         return "invalid", "record-not-canonicalizable"
     if rec.get("record_id") != env["record_id"]:
         return "invalid", "record-id-binding"                 # SPEC §5.5 RECORD_ID_BINDING_MISMATCH
     if hashlib.sha256(jcs(env["domain"])).hexdigest() != env["domain_hash"]:
-        return "invalid", "domain-hash-mismatch"              # SPEC §5.5 fogadó-oldalon újraszámolva
+        return "invalid", "domain-hash-mismatch"              # SPEC §5.5 recomputed on the receiving side
     if admission is None:
-        return "unverifiable", "no-admission"                 # role/org nélkül az aláírt üzenet nem építhető fel
-    # Saját az OPCIONÁLIS `config_id` csendben kihagyta a kötést -> egy másik config-kontextusba
-    # átültetett boríték is átment (cross-config replay). A hiányzó kötés harmadik állapot, nem zöld.
+        return "unverifiable", "no-admission"                 # without role/org the signed message cannot be built
+    # the OPTIONAL `config_id` silently skipped the binding -> an envelope transplanted into another config context
+    # also passed (cross-config replay). A missing binding is a third state, not green.
     if admission.get("config_id") is None:
         return "unverifiable", "no-config-binding"
     if admission["config_id"] != env["config_id"]:
@@ -232,11 +232,11 @@ def _builtin_verify(rec, env, sender, admission, registry_pubkey):
     by_issuer = {a.get("issuer"): a for a in admission["admitted"] if isinstance(a, dict)}
     mine = [a for a in admission["admitted"] if isinstance(a, dict) and a.get("sender") == sender]
     if not mine:
-        return "invalid", "not-admitted"                      # 3. lépés: a busz-feladó nincs beengedve
+        return "invalid", "not-admitted"                      # step 3: the bus sender is not admitted
     if registry_pubkey is not None and registry_pubkey not in {a.get("issuer") for a in mine}:
-        return "invalid", "key-mismatch"                      # 3. lépés: registry-kulcs ≠ beengedett issuer
+        return "invalid", "key-mismatch"                      # step 3: registry key ≠ admitted issuer
     if not any(s["issuer"] in {a.get("issuer") for a in mine} for s in env["sigs"]):
-        return "invalid", "not-admitted"                      # a feladó saját issuere nem írta alá
+        return "invalid", "not-admitted"                      # the sender's own issuer did not sign it
     if any(s["issuer"] not in by_issuer for s in env["sigs"]):
         return "invalid", "not-admitted"
     if not HAVE_CRYPTO:
@@ -244,8 +244,8 @@ def _builtin_verify(rec, env, sender, admission, registry_pubkey):
     for s in env["sigs"]:
         a = by_issuer[s["issuer"]]
         try:
-            # az NFC/NFD kétértelműség két KÜLÖNBÖZŐ aláírt bájtsort ad ugyanarra a látszólagos role/org-ra.
-            # A JCS szándékosan nem normalizál, ezért az admission-mezőket normalizáljuk EGYSZER, itt.
+            # the NFC/NFD ambiguity gives two DIFFERENT signed byte sequences for the same apparent role/org.
+            # JCS deliberately does not normalize, so we normalize the admission fields ONCE, here.
             msg = signed_message(env, unicodedata.normalize("NFC", str(a.get("role", ""))),
                                  unicodedata.normalize("NFC", str(a.get("org", ""))))
             _ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(s["issuer"])).verify(bytes.fromhex(s["sig"]), msg)

@@ -36,7 +36,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--quick", action="store_true", help="skip chapter 3 (the coverage floor takes minutes)")
     ap.add_argument("--external-root", default=None,
-                    help="a partner-repó helyi checkoutja: a Chapter 4 pinelt fájl-hash-ei újramérve")
+                    help="a local checkout of the partner repo: Chapter 4's pinned file hashes re-measured")
     ap.add_argument("--json", dest="as_json", action="store_true", help="machine-readable summary on stdout")
     a = ap.parse_args(argv)
     t0, chapters = time.time(), []
@@ -87,7 +87,7 @@ def main(argv=None) -> int:
         st = arm.get("status")
         if st == "measured":
             files = arm.get("files") or []
-            if a.external_root:                            # a vevő saját checkoutján újra hasheljük a pinelt fájlokat
+            if a.external_root:                            # we re-hash the pinned files on the buyer's own checkout
                 bad = [f["path"] for f in files
                        if not (os.path.isfile(os.path.join(a.external_root, f["path"]))
                                and ev.sha256_file(os.path.join(a.external_root, f["path"])) == f["sha256"])]

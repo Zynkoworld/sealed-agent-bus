@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""bus_ssh_enroll — KORLÁTOZOTT authorized_keys-sor egy távoli agent SSH-kulcsához (v1.2).
+"""bus_ssh_enroll — a RESTRICTED authorized_keys line for a remote agent's SSH key (v1.2).
 
-A sor a kulcsot EGYETLEN parancshoz köti, és minden mást tilt:
+The line binds the key to a SINGLE command, and forbids everything else:
 
     command="<exchange-parancs> <identity>",restrict,no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc <pubkey>
 
-- A `command=` az identitást PINELI → a távoli fél nem adhatja ki magát másnak (bus_ssh_exchange az argumentumból veszi).
-- A `restrict` az OpenSSH-ban mindent tilt; a no-* opciókat IS kiírjuk, hogy régebbi sshd-n se nyíljon rés.
-- Ez a modul CSAK a sort állítja elő, és CSAK a megadott fájlba írja (append, 0600, idempotens). Az sshd-konfigurációhoz,
-  a rendszer authorized_keys-éhez NEM nyúl — hogy a sor melyik fiókhoz kerül, az operátor döntése. stdlib-only."""
+- `command=` PINS the identity → the remote party cannot impersonate anyone else (bus_ssh_exchange takes it from the argument).
+- In OpenSSH `restrict` forbids everything; we ALSO write out the no-* options, so no gap opens on an older sshd either.
+- This module ONLY produces the line, and writes it ONLY into the given file (append, 0600, idempotent). It does NOT touch the sshd
+  configuration or the system's authorized_keys — which account the line goes to is the operator's decision. stdlib-only."""
 from __future__ import annotations
 
 import argparse
@@ -23,15 +23,15 @@ _KEYTYPES = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa
              "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com", "ssh-rsa")
 _B64 = re.compile(r"^[A-Za-z0-9+/]+={0,3}$")
 _CMD_SAFE = re.compile(r'^[A-Za-z0-9_./ =:@+-]+$')
-_FROM_SAFE = re.compile(r'^[A-Za-z0-9_.:*?/,\[\]!-]+$')      # IP/CIDR/hosztminta, idézőjel és szóköz nélkül
-_MIN_RSA_BITS = 3072                                        # a gyenge RSA nem kerülhet be
+_FROM_SAFE = re.compile(r'^[A-Za-z0-9_.:*?/,\[\]!-]+$')      # IP/CIDR/host pattern, without quotes and spaces
+_MIN_RSA_BITS = 3072                                        # weak RSA cannot get in
 
 
 def _key_bits_ok(keytype: str, blob_b64: str) -> tuple:
-    """(ok, ok_vagy_ok) — a kulcs ERŐSSÉGE, nem csak az alakja.
+    """(ok, reason) — the key's STRENGTH, not just its shape.
 
-    Saját az `ssh-rsa` eddig BÁRMILYEN hosszal átment (akár 512 bit), mert csak a base64
-    ALAKJÁT néztük, a tartalmát nem. Itt dekódoljuk és kiolvassuk a modulus bithosszát.
+    `ssh-rsa` used to pass with ANY length (even 512 bits), because we only looked at the base64
+    SHAPE, not its content. Here we decode it and read the modulus bit length.
     """
     import base64
     import struct
@@ -60,10 +60,10 @@ def _key_bits_ok(keytype: str, blob_b64: str) -> tuple:
 
 
 def enroll_line(identity: str, pubkey: str, exchange_cmd: str, source: str | None = None) -> str:
-    """-> egy authorized_keys-sor (újsor nélkül). Érvénytelen identitás/kulcs/parancs → ValueError.
+    """-> an authorized_keys line (without newline). An invalid identity/key/command → ValueError.
 
-    `source`: opcionális `from=` minta (IP/CIDR/hosztminta). Saját forráskorlát nélkül egy
-    kiszivárgott kulcs a világ bármely pontjáról használható — a `from=` az OLCSÓ második fal.
+    `source`: an optional `from=` pattern (IP/CIDR/host pattern). Without a source limit a
+    leaked key can be used from anywhere in the world — `from=` is the CHEAP second wall.
     """
     import agent_bus as ab
     if not identity or ab._safe_name(identity) != identity:
@@ -76,23 +76,23 @@ def enroll_line(identity: str, pubkey: str, exchange_cmd: str, source: str | Non
     ok, why = _key_bits_ok(parts[0], parts[1])
     if not ok:
         raise ValueError(why)
-    key = "%s %s" % (parts[0], parts[1])                     # a kulcs-komment kimarad (nem kerülhet bele idézőjel/opció)
+    key = "%s %s" % (parts[0], parts[1])                     # the key comment is left out (no quote/option can get in)
     opts = ",".join(RESTRICTIONS)
     if source:
         if not _FROM_SAFE.match(source) or '"' in source:
             raise ValueError("from= pattern contains unsafe characters")
-        opts = 'from="%s",%s' % (source, opts)               # a from= az OPCIÓK ELEJÉN áll (olvashatóság)
+        opts = 'from="%s",%s' % (source, opts)               # from= stands at the START of the options (readability)
     return 'command="%s %s",%s %s' % (exchange_cmd, identity, opts, key)
 
 
 def write_line(path: str, line: str) -> bool:
-    """A sor hozzáfűzése a MEGADOTT fájlhoz (0600). Már bent lévő kulcs → nem duplikál. -> True, ha írt.
+    """Append the line to the GIVEN file (0600). A key already present → no duplicate. -> True if it wrote.
 
-    Saját az idempotencia CSENDES DOWNGRADE volt — ha a kulcs már bent volt egy GYENGÉBB
-    (pl. `restrict` nélküli, vagy más identitásra pinelt) sorban, a modul „already present"-et mondott, és a
-    korlátozott sor SOSEM került be. Mostantól: azonos kulcs + azonos sor → no-op; azonos kulcs + ELTÉRŐ sor
-    → ValueError (az operátor lássa, hogy mit kellene cserélnie), és ugyanígy, ha a bent lévő sorból hiányzik
-    a `restrict` vagy a `command=`.
+    The idempotence was a SILENT DOWNGRADE — if the key was already present in a WEAKER line
+    (e.g. without `restrict`, or pinned to another identity), the module said "already present", and the
+    restricted line NEVER got in. From now on: same key + same line → no-op; same key + DIFFERENT line
+    → ValueError (the operator should see what to replace), and likewise if the existing line lacks
+    `restrict` or `command=`.
     """
     if "\n" in line or "\r" in line:
         raise ValueError("line must be a single line")
@@ -105,7 +105,7 @@ def write_line(path: str, line: str) -> bool:
         if not ln.strip() or not ln.endswith(key):
             continue
         if ln.strip() == line.strip():
-            return False                                     # pontosan ugyanaz: no-op
+            return False                                     # exactly the same: no-op
         raise ValueError("this key is already in %s with a DIFFERENT line (identity or restrictions differ) — "
                          "replace it deliberately, do not stack a second line:\n  existing: %s\n  wanted:   %s"
                          % (path, ln.strip(), line.strip()))
@@ -130,8 +130,8 @@ def main(argv=None) -> int:
     with open(a.pubkey_file, encoding="utf-8") as f:
         line = enroll_line(a.identity, f.read(), a.exchange_cmd, source=a.source)
     if not a.source:
-        sys.stderr.write("bus_ssh_enroll: FIGYELEM — nincs `from=` forráskorlát a sorban: egy kiszivárgott kulcs "
-                         "a világ bármely pontjáról használható. Ha ismered a partner kimenő címét: --from <IP/CIDR>\n")
+        sys.stderr.write("bus_ssh_enroll: WARNING — no `from=` source limit in the line: a leaked key "
+                         "can be used from anywhere in the world. If you know the partner's outbound address: --from <IP/CIDR>\n")
     if a.out:
         print("written" if write_line(a.out, line) else "already present")
     else:

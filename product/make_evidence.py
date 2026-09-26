@@ -73,19 +73,19 @@ def main(argv=None) -> int:
     ap.add_argument("--version", required=True)
     ap.add_argument("--commit", default="HEAD")
     ap.add_argument("--external-root", default=None,
-                    help="a partner-repó helyi checkoutja: a Chapter 4 pinelt fájljait újra hasheli")
+                    help="a local checkout of the partner repo: re-hashes Chapter 4's pinned files")
     ap.add_argument("--allow-dirty", action="store_true",
-                    help="csak próbafuttatáshoz: piszkos munkafán is épít (a suite-sor ilyenkor nem a fáról szól)")
+                    help="only for a trial run: builds on a dirty working tree too (the suite line then does not describe the tree)")
     ap.add_argument("--skip-floor", action="store_true", help="only for a dry run: the floor is the point")
     a = ap.parse_args(argv)
     t0 = time.time()
     commit = git("rev-parse", a.commit).strip()
-    # A boríték a COMMIT fáját írja le, a suite viszont a MUNKAFÁN fut: ha a kettő eltér, a manifestbe egy olyan
-    # suite-sor kerülne, ami nem a szállított fáról szól (mérve 2026-09-19: épp emiatt lett '1 failed' a manifestben).
+    # The envelope describes the COMMIT's tree, but the suite runs on the WORKING TREE: if the two differ, a suite
+    # line would go into the manifest that does not describe the shipped tree (measured 2026-09-19: exactly why '1 failed' ended up in the manifest).
     dirty = [l[3:] for l in git("status", "--porcelain").splitlines()
              if l[3:].strip() and not l[3:].startswith("product/evidence/")]
     if dirty and not a.allow_dirty:
-        raise SystemExit("a munkafa nem tiszta (%s%s) — előbb commitold a kódot, a boríték csak utána épül"
+        raise SystemExit("the working tree is not clean (%s%s) — commit the code first, the envelope is built only after that"
                          % (", ".join(dirty[:4]), " …" if len(dirty) > 4 else ""))
     os.makedirs(EV, exist_ok=True)
 
@@ -137,25 +137,25 @@ def main(argv=None) -> int:
                           time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "results": floor,
                           "notary_probes": probes, "demo_chain": chain})
     ext = json.load(open(os.path.join(HERE, "external_arms.json"), encoding="utf-8"))
-    if a.external_root:                                    # a pinelt artefaktumok ÚJRAMÉRÉSE egy helyi checkoutból
+    if a.external_root:                                    # RE-MEASURING the pinned artifacts from a local checkout
         for arm in ext["arms"]:
             for f in arm.get("files") or []:
                 fp = os.path.join(a.external_root, f["path"])
                 f["reverified"] = (os.path.isfile(fp) and ev.sha256_file(fp) == f["sha256"])
     write("EXTERNAL.json", ext)
-    # MÁSODIK MENET: a suite-ot az ELKÉSZÜLT borítékkal is lefuttatjuk, és EZT írjuk a manifestbe. Az első menet a
-    # RÉGI borítékot méri (a boríték önellenőrző tesztje ilyenkor jogosan piros), tehát az a sor nem a szállított
-    # fáról szólna. A fájl-hash-eket ez nem érinti: a manifest a product/evidence/-et kihagyja.
+    # SECOND PASS: we also run the suite with the FINISHED envelope, and THAT is what we write into the manifest. The first pass
+    # measures the OLD envelope (the envelope's self-check test is rightly red then), so that line would not describe the shipped
+    # tree. The file hashes are unaffected: the manifest skips product/evidence/.
     suite2 = subprocess.run(cmd, cwd=TREE, capture_output=True, text=True,
                             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
     tail2 = (suite2.stdout + suite2.stderr).strip().splitlines()
     final_line = "%s%s" % (tail2[-1] if tail2 else "no output", "" if have_pytest else "  [PARTIAL: pytest not installed]")
-    write("suite.txt", "runner: %s\n\nelso menet (a korabbi boritek ellen):\n%s\n\nmasodik menet (a kesz boritekkel):\n%s"
+    write("suite.txt", "runner: %s\n\nfirst pass (against the previous envelope):\n%s\n\nsecond pass (with the finished envelope):\n%s"
           % (" ".join(cmd[1:]), suite.stdout + suite.stderr, suite2.stdout + suite2.stderr))
     man = json.load(open(os.path.join(EV, "MANIFEST.json"), encoding="utf-8"))
     man["suite"], man["suite_first_pass"] = final_line, suite_line
     write("MANIFEST.json", man)
-    print("==> suite (masodik menet, a kesz boritekkel): %s" % final_line)
+    print("==> suite (second pass, with the finished envelope): %s" % final_line)
     print("\nevidence written to %s (%.0fs)" % (EV, time.time() - t0))
     # WEAK is a REPORTED state of the evidence, not a build error: the mutation applied, something went red, and
     # no test decided. The envelope and the gate both name it, so a build that exits non-zero on it would make
