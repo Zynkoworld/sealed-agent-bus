@@ -293,7 +293,7 @@ def verify_sender(msg, keys_dir=None):
       - "unsigned-pinned" — no signature, but the registry BINDS a key to the declared sender: the name belongs to a
                      party able to sign, yet the row is bare. NOT proven forgery (the back-compat path is legal), but
                      it does not blend into anonymous `unsigned` either — (2026-09-17): a bare row arriving in the name
-                     of a sender that signs 100% of the time was until then only a HUMAN/statistical
+                     of a sender that signs 100 percent of the time was until then only a HUMAN/statistical
                      detection, with no machine gate. This class is the machine gate's input (strict/product mode).
       - "forged"   — has a signature, but it is invalid, OR the pubkey is NOT the one the registry binds to the declared sender (impersonation).
       - "signed"   — valid signature with the registry key belonging to `msg['sender']`.

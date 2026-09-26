@@ -1411,7 +1411,7 @@ def main(argv=None) -> int:
                 return 3
             print("bus_notary verify: WARNING — " + msg + " So the report's `trusted` field is false.", file=sys.stderr)
         elif rep["ok"] and rep["unverified_tail"]:
-            msg = ("the %d entries after the last verified checkpoint (seq %s) are bound only by the hash chain, not by a signature "
+            msg = ("after the last verified checkpoint (seq %s) the %d entries are bound only by the hash chain, not by a signature "
                    "— the slice is NOT trusted (trusted:false). Wait for the next checkpoint, or make one "
                    "(bus_notary checkpoint), and export again." % (rep["covered_to_seq"], rep["unverified_tail"]))
             if args.pub and is_product():                       # round closing in product mode regardless of its size

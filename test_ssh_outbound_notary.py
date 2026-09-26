@@ -1,9 +1,9 @@
-"""v1.5 — a közjegyzői napló KIMENŐ iránya az SSH-határon + reconcile.
+"""v1.5 — the OUTBOUND direction of the notary log at the SSH boundary + reconcile.
 
-a partner-kar 3 piros tesztje (test_joint_outbound_notary.py) azt kéri, hogy a kiadott válaszokról és az ack-ról legyen
-bejegyzés, és hogy az elnyelt posta lássék. Ezek a tesztek a megoldás tulajdonságait rögzítik: naplózás-előbb (naplóhiba
--> nincs kiadás, nincs kurzor-mozgás), napló-horgony a válaszban, üres kör nem ír zajt, és a `reconcile` a távoli fél
-nyugtáiból kimutatja a kihagyást, amit a seq-rés nem mutat. stdlib unittest + cryptography."""
+The partner arm's 3 red tests (test_joint_outbound_notary.py) ask for entries about the delivered replies and the ack,
+and that swallowed mail be visible. These tests pin the properties of the solution: log-first (log error
+-> no delivery, no cursor move), a log anchor in the response, an empty round writes no noise, and `reconcile` shows from the remote party's
+receipts an omission that the seq gap does not show. stdlib unittest + cryptography."""
 import json
 import os
 import subprocess
@@ -57,8 +57,8 @@ class OutboundLogFirst(_Base):
         self.queue(2)
         res = self.x({})
         ents = self.entries()
-        # A ZÁRÓ horgony (támadási mátrix 2.7) a mellékhatások UTÁN, a kör végén íródik — a naplózás-előbb
-        # sorrend változatlan: a kiadás-bejegyzések a kiadás ELŐTT, a zárás az egész UTÁN.
+        # The CLOSING anchor (attack matrix 2.7) is written AFTER the side effects, at the end of the round — the log-first
+        # order is unchanged: the delivery entries BEFORE the delivery, the close AFTER everything.
         self.assertEqual([(e["kind"], e["decision"], e["reason"]) for e in ents],
                          [("pickup", "accepted", "cursor=0 replies=2")] +
                          [("pickup", "delivered", "id=%d" % m["id"]) for m in res["replies"]] +
@@ -90,7 +90,7 @@ class OutboundLogFirst(_Base):
         self.assertEqual(self.entries(), [])
 
     def test_partial_failure_logs_before_hand_out_never_after(self):
-        """Az első `delivered` után bukik a napló: túl-naplózás (1 bejegyzés, 0 kiadás) megengedett, fordítva nem."""
+        """The log fails after the first `delivered`: over-logging (1 entry, 0 deliveries) is allowed, the reverse is not."""
         self.queue(3)
         real, n = self.notary.record, {"i": 0}
 
@@ -135,7 +135,7 @@ class Reconcile(_Base):
         self.assertEqual((rep["ok"], rep["discrepancies"], rep["unconfirmed_deliveries"]), (True, [], []))
 
     def test_reconcile_detects_omitted_inbound(self):
-        """A kihagyás NEM ad seq-rést (verify ok) — a reconcile igen."""
+        """An omission does NOT give a seq gap (verify ok) — reconcile does."""
         real, n = self.notary.record, {"i": 0}
 
         def skip_second(**kw):
@@ -153,8 +153,8 @@ class Reconcile(_Base):
                          [("sent_not_logged", bn.envelope_hash(sent[1]))])
 
     def test_reconcile_detects_withheld_outbound(self):
-        self.queue(4, "soha")
-        ab.ack("remote1", 4, db=self.db)                        # a busz-gép napló nélkül elnyeli a postát
+        self.queue(4, "never")
+        ab.ack("remote1", 4, db=self.db)                        # the bus machine swallows the mail without logging
         res = self.x({})
         self.assertEqual(res["replies"], [])
         rep = bn.reconcile(bn.export(self.log, 1), "remote1", [{"sent": [], "ack": 0, "received": []}])
@@ -162,7 +162,7 @@ class Reconcile(_Base):
                          [{"type": "cursor_moved_without_logged_ack", "seq": 1, "cursor": 4, "expected": 0}])
 
     def test_reconcile_failed_ack_does_not_count_as_a_cursor_move(self):
-        """ack_failed után a kurzor nem mozdult: a következő kör kurzora a régi, és ez NEM eltérés."""
+        """After ack_failed the cursor did not move: the next round's cursor is the old one, and that is NOT a discrepancy."""
         self.queue(2)
         r1 = self.rounds({})
         with mock.patch.object(ab, "ack", side_effect=RuntimeError("database is locked")):
@@ -174,11 +174,11 @@ class Reconcile(_Base):
         self.assertTrue(rep["unconfirmed_deliveries"] == [] or all(u["received"] > 0 for u in rep["unconfirmed_deliveries"]))
 
     def test_two_way_forged_ack_and_unreceived_delivery_are_discrepancies(self):
-        """36Z: a napló állításai a nyugtához is mérve (ack_logged_not_sent, delivered_not_received)."""
+        """36Z: the log's claims measured against the receipt too (ack_logged_not_sent, delivered_not_received)."""
         self.queue(1)
-        res = self.x({})                                        # 1 válasz kiadva és naplózva
+        res = self.x({})                                        # 1 reply delivered and logged
         self.notary.record(envelope={"ack": 1}, sender_identity="remote1", sender_auth="ssh-key", recipient="remote1",
-                           kind="ack", decision="accepted", reason="cursor 0->1 (ack 1)")   # kitalált ack
+                           kind="ack", decision="accepted", reason="cursor 0->1 (ack 1)")   # a made-up ack
         rep = bn.reconcile(bn.export(self.log, 1), "remote1", [{"sent": [], "ack": 0, "received": []}])
         self.assertFalse(rep["ok"])
         self.assertEqual(sorted(d["type"] for d in rep["discrepancies"]), ["ack_logged_not_sent", "delivered_not_received"])
@@ -213,19 +213,19 @@ class Reconcile(_Base):
         types = sorted(d["type"] for d in rep["discrepancies"])
         self.assertEqual([t for t in types if t != "verify_error"],
                          ["ack_sent_not_logged", "received_not_logged"])
-        # 2026-09-16: ez a fixtúra a SAJÁT exportjából KITÖRÖL egy bejegyzést — attól a hash-lánc valóban
-        # törik, és a jelentés eddig csak a TÜNETET nevezte meg („a kézbesítés nincs naplózva"), a LYUKAT
-        # magát nem. Egy naplóból kivágott sor viszont sokkal súlyosabb vád, mint egy hiányzó nyugta, és a
-        # `verify()` tudta is — a `reconcile` dobta el. Innentől kimondjuk.
+        # 2026-09-16: this fixture DELETES an entry from its OWN export — so the hash chain really
+        # breaks, and the report used to name only the SYMPTOM ("the delivery is not logged"), not the HOLE
+        # itself. But a row cut out of a log is a much graver accusation than a missing receipt, and
+        # `verify()` knew it — `reconcile` threw it away. From now on we state it.
         errs = sorted(d["error"] for d in rep["discrepancies"] if d["type"] == "verify_error")
-        self.assertEqual(len(errs), 2, "a kivágott sor nyoma nincs megnevezve: %r" % errs)
+        self.assertEqual(len(errs), 2, "the trace of the cut-out row is not named: %r" % errs)
         self.assertTrue(any("gap" in e for e in errs), errs)
         self.assertTrue(any("chain broken" in e for e in errs), errs)
 
 
 @unittest.skipUnless(bn.HAVE_CRYPTO, "cryptography missing")
 class ClientReceiptsEndToEnd(_Base):
-    """A valódi kliens (bus_ssh_client) nyugta-fájlja + a `bus_notary reconcile` CLI, hamis ssh-val."""
+    """The real client's (bus_ssh_client) receipt file + the `bus_notary reconcile` CLI, with a fake ssh."""
 
     def _fake_ssh(self):
         path = os.path.join(self.tmp.name, "fake_ssh.py")
@@ -245,8 +245,8 @@ class ClientReceiptsEndToEnd(_Base):
             f.write(self.seed.hex())
         state, local_db = os.path.join(self.tmp.name, "state"), os.path.join(self.tmp.name, "local.db")
         with mock.patch.dict(os.environ, {"AGENT_BUS_NOTARY": "on", "AGENT_BUS_NOTARY_KEY": key}):
-            ab.send("hub", "remote1", "első", db=self.db, mirror=False)
-            cli.exchange("bus", "me", [{"to": "hub", "body": "szia"}], ssh_cmd=self._fake_ssh(), state_dir=state, db=local_db)
+            ab.send("hub", "remote1", "first", db=self.db, mirror=False)
+            cli.exchange("bus", "me", [{"to": "hub", "body": "hello"}], ssh_cmd=self._fake_ssh(), state_dir=state, db=local_db)
             cli.exchange("bus", "me", [], ssh_cmd=self._fake_ssh(), state_dir=state, db=local_db)   # ack 1
             receipts = cli.receipts_path(state, "bus", "me")
             exp = os.path.join(self.tmp.name, "export.jsonl")
@@ -260,8 +260,8 @@ class ClientReceiptsEndToEnd(_Base):
                                       capture_output=True, text=True)
             p = run()
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-            ab.send("hub", "remote1", "elnyelendő", db=self.db, mirror=False)
-            ab.ack("remote1", 10 ** 6, db=self.db)                  # a busz-gép előreugratja a kurzort
+            ab.send("hub", "remote1", "to-be-swallowed", db=self.db, mirror=False)
+            ab.ack("remote1", 10 ** 6, db=self.db)                  # the bus machine advances the cursor
             cli.exchange("bus", "me", [], ssh_cmd=self._fake_ssh(), state_dir=state, db=local_db)
             p = run()
         self.assertEqual(p.returncode, 1, p.stdout)
@@ -274,7 +274,7 @@ if __name__ == "__main__":
 
 @unittest.skipUnless(bn.HAVE_CRYPTO, "cryptography missing")
 class CursorTargetAndOutcomes(_Base):
-    """37Z: a kurzor-cél kötése a naplóból (verify is), a kör-kimenetel a nyugtában, a --pub alak."""
+    """37Z: binding the cursor target from the log (verify too), the round outcome in the receipt, the --pub shape."""
 
     def _dump(self, name, rows):
         p = os.path.join(self.tmp.name, name)
@@ -284,20 +284,20 @@ class CursorTargetAndOutcomes(_Base):
 
     def test_verify_reports_a_cursor_target_beyond_max_from_ack(self):
         self.queue(1)
-        self.x({"ack": 1})                                      # becsületes: cursor 0->1 (ack 1)
+        self.x({"ack": 1})                                      # honest: cursor 0->1 (ack 1)
         self.assertEqual(bn.verify(bn.export(self.log, 1), trusted_pub=self.pub)["ack_target_violations"], [])
         self.notary.record(envelope={"ack": 1}, sender_identity="remote1", sender_auth="ssh-key", recipient="remote1",
                            kind="ack", decision="accepted", reason="cursor 1->9 (ack 1)")
         self.notary.checkpoint()
         rep = bn.verify(bn.export(self.log, 1), trusted_pub=self.pub)
-        self.assertTrue(rep["ok"] and rep["trusted"])            # a lánc aláírtan ép ...
-        self.assertEqual([v["reason"] for v in rep["ack_target_violations"]], ["cursor 1->9 (ack 1)"])   # ... és hazug
+        self.assertTrue(rep["ok"] and rep["trusted"])            # the chain is intact and signed ...
+        self.assertEqual([v["reason"] for v in rep["ack_target_violations"]], ["cursor 1->9 (ack 1)"])   # ... and lying
         exp = self._dump("e.jsonl", bn.export(self.log, 1))
         with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
             self.assertEqual(bn.main(["verify", exp, "--pub", self.pub]), 1)
 
     def test_unknown_outcome_is_unresolved_not_an_accusation(self):
-        rows = [{"phase": "request", "round": "r1", "sent": [{"to": "hub", "body": "talán"}], "ack": 3, "received": []},
+        rows = [{"phase": "request", "round": "r1", "sent": [{"to": "hub", "body": "maybe"}], "ack": 3, "received": []},
                 {"phase": "outcome", "round": "r1", "outcome": "unknown"}]
         rep = bn.reconcile(bn.export(self.log, 1), "remote1", rows, strict=False)
         self.assertEqual((rep["ok"], rep["discrepancies"]), (True, []))
@@ -314,7 +314,7 @@ class CursorTargetAndOutcomes(_Base):
     def test_client_ssh_that_cannot_start_records_not_sent(self):
         import bus_ssh_client as cli
         state = os.path.join(self.tmp.name, "state")
-        res = cli.exchange("bus", "me", [{"to": "hub", "body": "x"}], ssh_cmd=[os.path.join(self.tmp.name, "nincs-ilyen")],
+        res = cli.exchange("bus", "me", [{"to": "hub", "body": "x"}], ssh_cmd=[os.path.join(self.tmp.name, "no-such-file")],
                            state_dir=state, db=os.path.join(self.tmp.name, "l.db"))
         self.assertIn("error", res)
         rows = [json.loads(l) for l in open(cli.receipts_path(state, "bus", "me"))]
@@ -328,4 +328,4 @@ class CursorTargetAndOutcomes(_Base):
         from contextlib import redirect_stderr
         with redirect_stderr(io.StringIO()) as err, mock.patch("sys.stdout"):
             self.assertEqual(bn.main(["verify", exp, "--pub", "/etc/notary.pub"]), 2)
-        self.assertIn("nem fájl-út", err.getvalue())
+        self.assertIn("not a file path", err.getvalue())
