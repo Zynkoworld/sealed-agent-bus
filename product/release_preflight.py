@@ -246,8 +246,12 @@ def check_envelope_fresh(_):
     man_path = os.path.join(EV, "MANIFEST.json")
     if not os.path.isfile(man_path):
         return False, "no envelope: run make_evidence.py"
-    problems = ev.check_manifest(TREE, json.load(open(man_path, encoding="utf-8")))
-    return (not problems), ("every shipped file matches the manifest" if not problems else
+    man = json.load(open(man_path, encoding="utf-8"))
+    # The provenance is checked HERE too, not only on the buyer's machine: an envelope whose only provenance field
+    # is the private build commit used to pass the gate and fail the buyer's own verifier.
+    problems = ev.check_manifest(TREE, man) + ev.check_public_provenance(TREE, man)
+    return (not problems), ("every shipped file matches the manifest; content digest %s re-derived from the tree"
+                            % ev.content_digest(ev.sealed_entries(TREE, man))[:12] if not problems else
                             "; ".join("%s: %s" % (p["file"], p["problem"]) for p in problems[:3]))
 
 

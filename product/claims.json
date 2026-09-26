@@ -110,6 +110,19 @@
    }
   },
   {
+   "id": "silent-processing-gap",
+   "claim": "A delivery the transport accepted but the receiving side never processed is reported, not silent.",
+   "tests": [
+    "test_silent_processing_gap.py"
+   ],
+   "peer_written": false,
+   "mutation": {
+    "file": "agent_bus.py",
+    "find": "        for mid in sorted(set(at) - done):",
+    "replace": "        for mid in sorted(set()):  # MUTATION: an unprocessed delivery is never reported"
+   }
+  },
+  {
    "id": "dead-owner-lock",
    "claim": "A lock held by a process that is gone does not block the next owner.",
    "tests": [

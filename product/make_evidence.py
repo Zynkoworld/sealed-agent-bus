@@ -43,6 +43,47 @@ def write(name, obj):
     return path
 
 
+def provenance(files: dict, commit: str) -> dict:
+    """The manifest's provenance block: what a reader of the PUBLIC repository can check, and what they cannot.
+
+    The old manifest carried `source_commit` and nothing else. That commit belongs to the BUILD repository; the
+    public repository is a squash export and does not contain the object, so an independent arm resolving the
+    published v1.5.1's commit got "bad object" — the one provenance field the envelope offered was the one field
+    a buyer could not check. The answer is not to drop it (a dropped check is invisible) and not to explain it in
+    prose (prose reads like a check without being one): every field is CLASSIFIED here, the class that says
+    "re-derived in public" is backed by a real check in `evidence.PUBLIC_CHECKS`, and the class that says "not
+    checkable in public" has to give its reason and name what covers it instead. `verify_evidence.py` enforces
+    all three, and FAILS on a manifest field that is in neither class."""
+    return {
+        "content_digest": ev.content_digest(files.items()),
+        "content_digest_recipe": ev.CONTENT_DIGEST_RECIPE,
+        "verifiable_in_public": ["content_digest", "file_count", "files", "product", "version"],
+        "unverifiable_in_public": [
+            {"field": "source_commit", "value": commit,
+             "reason": "a commit of the BUILD repository. The public repository is a squash export, so this object "
+                       "is not in it and `git cat-file` answers 'bad object' — measured by an independent arm on "
+                       "the published v1.5.1. It is kept because dropping it would hide the gap, not close it.",
+             "covered_instead_by": "content_digest"},
+            {"field": "built",
+             "reason": "the build machine's Python version and UTC clock. Nothing in the archive can attest to "
+                       "either; a reader can only see what the seller wrote down.",
+             "covered_instead_by": ev.UNCOVERED},
+            {"field": "suite",
+             "reason": "the test-suite line MEASURED ON THE BUILD MACHINE. It is re-runnable with the runner named "
+                       "in suite_runner, but the numbers depend on the machine (the key-registry guard needs a "
+                       "root-owned registry, so a non-root run legitimately reds ~26 tests) — so a reader "
+                       "reproducing a different line has not caught a lie.",
+             "covered_instead_by": ev.UNCOVERED},
+            {"field": "suite_first_pass",
+             "reason": "the same, for the pass measured against the PREVIOUS envelope — a build-machine record.",
+             "covered_instead_by": ev.UNCOVERED},
+            {"field": "suite_runner",
+             "reason": "a statement about HOW the build machine ran the suite; the archive cannot attest to it.",
+             "covered_instead_by": ev.UNCOVERED},
+        ],
+    }
+
+
 def demo_chain():
     """A real chain, signed with a key generated for this release: the buyer sees a genuine signed artifact, and can
     re-verify it with the public key next to it. It carries probe data only — no customer traffic, ever."""
@@ -129,10 +170,11 @@ def main(argv=None) -> int:
     status, probes = ev.run_notary_chapter(TREE)
     print("    chain: %s, probes: %s" % (chain.get("status"), status))
 
-    write("MANIFEST.json", {"product": "sealed-bus", "version": a.version, "source_commit": commit,
+    write("MANIFEST.json", {"product": ev.PRODUCT, "version": a.version, "source_commit": commit,
                             "files": files, "file_count": len(files),
                             "built": {"python": sys.version.split()[0], "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
-                            "suite": suite_line, "suite_runner": " ".join(cmd[1:])})
+                            "suite": suite_line, "suite_runner": " ".join(cmd[1:]),
+                            "provenance": provenance(files, commit)})
     write("CLAIMS.json", {"floor_note": ev.load_claims(HERE)["floor_note"], "measured_utc":
                           time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "results": floor,
                           "notary_probes": probes, "demo_chain": chain})

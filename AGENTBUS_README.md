@@ -22,7 +22,30 @@ The examples below use it, so they can be copied anywhere. Design: `docs/AGENT_B
 "$AGENT_BRIDGE_DIR"/agent_bus.py thread --id <tid>     |     tail --agent <me>
 # schema check (frozen contract; exit 0=OK, 1=DRIFT):
 "$AGENT_BRIDGE_DIR"/agent_bus.py verify
+# proof of processing: the receiving side records that it actually HANDLED these ids
+"$AGENT_BRIDGE_DIR"/agent_bus.py processed --agent <me> --ids 41,42
+# the silent-drop audit: accepted deliveries with no proof of processing (exit 0=clean, 1=drops found)
+"$AGENT_BRIDGE_DIR"/agent_bus.py silent-drops --agent <me> [--grace 60] [--json]
 ```
+
+### Silent drops — delivery is not processing
+`recv --mark` and the SSH tier's `mark_delivered` prove the TRANSPORT handed a message over. Neither says the
+receiving side did anything with it, so a handler that returns early, filters the message away or swallows its own
+exception used to leave a bus that looked perfectly healthy: the row is read, the cursor moved, `reconcile` is empty
+— and the message is gone.
+
+So the receiving side acknowledges PROCESSING separately, into the same hash-chained `cursor_audit`
+(`processed` / `processed_refused` rows — no schema change), and `silent-drops` compares the ids the chain records as
+delivered against the ids that carry a processing ack. The difference is a delivery nobody acted on.
+
+- An ack may cover **only** an id the chain records as delivered to that agent; anything else is refused into its own
+  hash-chained `processed_refused` row, so a receiver cannot buy silence by claiming everything.
+- `--grace N` ignores deliveries younger than N seconds (in flight, not dropped). The default is 0 and reports
+  everything outstanding.
+- `silent-drops` exits non-zero when it finds any, so a cron job or a CI step sees the silence without anyone
+  going to look for it.
+- This is the question NEXT TO `reconcile`, not the same one: `reconcile` lists what the cursor stepped over
+  **without delivering**; `silent-drops` lists what was delivered **into a void**.
 
 ## v1.1 (2026-09-14) — in brief
 - **Sacred typing, sleep-safe, operator wake:** `agent_wake.py` (wired into `bus_poke.py`, `agent_bus_watcher.py`).
